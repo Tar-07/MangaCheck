@@ -232,9 +232,12 @@
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <button onclick="saveAndConnectSyncKey()" class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition">
-              บันทึก & ซิงค์ตอนนี้
+              📥 ดึงซิงค์จาก Cloud
+            </button>
+            <button onclick="forcePushNow()" class="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition">
+              📤 ส่งข้อมูลเครื่องนี้ขึ้น Cloud
             </button>
             <button onclick="copySyncLink()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition">
               📋 คัดลอกลิ้งค์เปิดในมือถือ
@@ -731,7 +734,7 @@
         mangas[idx].lastChecked = Date.now();
       }
 
-      saveMangas();
+      saveMangas(!silent);
       renderMangaList();
       if (!silent) {
         if (mangas[idx].status === 'available') {
@@ -740,7 +743,7 @@
       }
     }
 
-    async function checkAllMangas() {
+    async function checkAllMangas(pushAfter = false) {
       if (mangas.length === 0) {
         showToast('ยังไม่มีรายการมังงะให้เช็ค');
         return;
@@ -752,6 +755,10 @@
 
       for (const m of mangas) {
         await checkSingleManga(m.id, true);
+      }
+
+      if (pushAfter) {
+        pushToCloud();
       }
 
       btn.disabled = false;
@@ -1011,15 +1018,45 @@
     async function pushToCloud() {
       if (!syncKey) return false;
       const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+      // Compact payload so 15+ mangas stay well under ntfy.sh 4096-byte message limit
+      const compactMangas = mangas.map(m => ({
+        i: m.id,
+        t: m.title,
+        u: m.currentUrl,
+        c: m.currentChapter,
+        n: m.nextChapter,
+        nu: m.nextUrl,
+        cv: m.coverUrl || '',
+        s: m.status === 'checking' ? 'waiting' : (m.status || 'waiting'),
+        ca: m.createdAt || Date.now()
+      }));
       try {
         const res = await fetch(`${NTFY_BASE}/${topic}`, {
           method: 'POST',
-          body: JSON.stringify({ updatedAt: Date.now(), mangas })
+          body: JSON.stringify({ updatedAt: Date.now(), mangas: compactMangas })
         });
         return res.ok;
       } catch (e) {
         return false;
       }
+    }
+
+    function expandMangaItem(x) {
+      if (!x) return x;
+      if (x.currentUrl) return x; // already full format
+      return {
+        id: x.i || ('m_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        title: x.t || 'มังงะเรื่องใหม่',
+        currentUrl: x.u || '',
+        currentChapter: x.c || '1',
+        nextChapter: x.n || '2',
+        nextUrl: x.nu || '',
+        coverUrl: x.cv || '',
+        status: x.s || 'waiting',
+        statusNote: '',
+        lastChecked: Date.now(),
+        createdAt: x.ca || Date.now()
+      };
     }
 
     async function pullFromCloud(showFeedback = false) {
@@ -1040,7 +1077,7 @@
         for (const line of lines) {
           try {
             const evt = JSON.parse(line);
-            if (evt.event === 'message' && evt.message) {
+            if (evt.event === 'message' && evt.message && !evt.attachment) {
               const parsedMsg = JSON.parse(evt.message);
               if (parsedMsg && Array.isArray(parsedMsg.mangas)) {
                 if (!latestPayload || (parsedMsg.updatedAt || 0) >= (latestPayload.updatedAt || 0)) {
@@ -1052,7 +1089,7 @@
         }
 
         if (latestPayload && Array.isArray(latestPayload.mangas)) {
-          mangas = latestPayload.mangas;
+          mangas = latestPayload.mangas.map(expandMangaItem);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
           renderMangaList();
           if (showFeedback && msg) {
@@ -1084,6 +1121,28 @@
       localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
       updateSyncStatusBadge();
       await pullFromCloud(true);
+    }
+
+    async function forcePushNow() {
+      const inputVal = document.getElementById('syncKeyInput').value.trim();
+      if (inputVal) {
+        syncKey = inputVal;
+        localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+        updateSyncStatusBadge();
+      }
+      if (!syncKey) {
+        showToast('กรุณาวางรหัสซิงค์ หรือกดปุ่ม "สร้างรหัสใหม่"');
+        return;
+      }
+      const msg = document.getElementById('syncModalMsg');
+      if (msg) msg.textContent = 'กำลังส่งข้อมูลเครื่องนี้ขึ้น Cloud...';
+      const ok = await pushToCloud();
+      if (ok) {
+        if (msg) msg.innerHTML = `<span class="text-emerald-400">✅ ส่งข้อมูลเครื่องนี้ (${mangas.length} เรื่อง) ขึ้น Cloud สำเร็จ!</span>`;
+        showToast(`📤 ส่งข้อมูล ${mangas.length} เรื่องขึ้น Cloud สำเร็จ!`);
+      } else {
+        if (msg) msg.innerHTML = `<span class="text-rose-400">⚠️ ส่งข้อมูลไม่สำเร็จ กรุณาลองอีกครั้ง</span>`;
+      }
     }
 
     function disconnectSyncKey() {
@@ -1144,9 +1203,11 @@
     // ==========================================
     // 6. PERSISTENCE & RENDERING
     // ==========================================
-    function saveMangas() {
+    function saveMangas(doPush = true) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
-      pushToCloud();
+      if (doPush) {
+        pushToCloud();
+      }
     }
 
     function loadMangas() {
