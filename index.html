@@ -1049,37 +1049,49 @@
       btn.disabled = false;
     }
 
+    function utf8ByteLength(str) {
+      return new TextEncoder().encode(str).length;
+    }
+
     async function pushToCloud() {
       if (!syncKey) return false;
       const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
       const batchId = localUpdatedAt || Date.now();
 
-      // Compact items
+      // Compact items (omit nextUrl since it can be re-derived from currentUrl + nextChapter!)
       const compactMangas = mangas.map(m => ({
         i: m.id,
         t: m.title,
         u: m.currentUrl,
         c: m.currentChapter,
         n: m.nextChapter,
-        nu: m.nextUrl,
         s: m.status === 'checking' ? 'waiting' : (m.status || 'waiting'),
         lc: m.lastChecked || 0,
         ca: m.createdAt || Date.now()
       }));
 
-      // Split into chunks of 18 items so even 100-500 mangas never exceed ntfy's 4096-byte message limit!
-      const CHUNK_SIZE = 18;
+      // Dynamically split into byte-safe chunks (max 2800 UTF-8 bytes per chunk, ~5-6 Thai items per chunk)
+      // because Thai characters take 3 UTF-8 bytes each, and ntfy converts any message > 4096 bytes into an attachment!
+      const MAX_CHUNK_BYTES = 2800;
       const chunks = [];
-      if (compactMangas.length === 0) {
-        chunks.push([]);
-      } else {
-        for (let i = 0; i < compactMangas.length; i += CHUNK_SIZE) {
-          chunks.push(compactMangas.slice(i, i + CHUNK_SIZE));
+      let currentChunk = [];
+
+      for (const item of compactMangas) {
+        const testChunk = [...currentChunk, item];
+        const testStr = JSON.stringify({ updatedAt: batchId, part: 0, totalParts: 99, mangas: testChunk });
+        if (currentChunk.length > 0 && utf8ByteLength(testStr) > MAX_CHUNK_BYTES) {
+          chunks.push(currentChunk);
+          currentChunk = [item];
+        } else {
+          currentChunk = testChunk;
         }
+      }
+      if (currentChunk.length > 0 || chunks.length === 0) {
+        chunks.push(currentChunk);
       }
 
       const totalParts = chunks.length;
-      let anySuccess = false;
+      let allPartsSucceeded = true;
 
       for (let partIdx = 0; partIdx < totalParts; partIdx++) {
         const bodyStr = JSON.stringify({
@@ -1098,23 +1110,31 @@
             }).then(r => r.ok)
           )
         );
-        if (results.some(r => r.status === 'fulfilled' && r.value === true)) {
-          anySuccess = true;
+        const partOk = results.some(r => r.status === 'fulfilled' && r.value === true);
+        if (!partOk) {
+          allPartsSucceeded = false;
         }
       }
-      return anySuccess;
+      return allPartsSucceeded;
     }
 
     function expandMangaItem(x) {
       if (!x) return x;
       if (x.currentUrl) return x; // already full format
+      const currentUrl = x.u || '';
+      const nextChapter = x.n || '2';
+      let nextUrl = x.nu || '';
+      if (!nextUrl && currentUrl) {
+        const parsed = parseMangaUrl(currentUrl, nextChapter);
+        if (parsed) nextUrl = parsed.nextUrl;
+      }
       return {
         id: x.i || ('m_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
         title: x.t || 'มังงะเรื่องใหม่',
-        currentUrl: x.u || '',
+        currentUrl,
         currentChapter: x.c || '1',
-        nextChapter: x.n || '2',
-        nextUrl: x.nu || '',
+        nextChapter,
+        nextUrl,
         status: x.s || 'waiting',
         statusNote: '',
         lastChecked: x.lc || 0,
