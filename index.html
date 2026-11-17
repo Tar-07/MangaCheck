@@ -775,32 +775,69 @@
       }
     }
 
-    async function checkAllMangas(pushAfter = false) {
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+
+    async function checkAllMangas(forceAll = true) {
       if (mangas.length === 0) {
-        showToast('ยังไม่มีรายการมังงะให้เช็ค');
+        if (forceAll) showToast('ยังไม่มีรายการมังงะให้เช็ค');
         return;
       }
+
+      const now = Date.now();
+      // Filter items that actually need checking:
+      // - If auto-check (forceAll = false): skip items already 'available' (unless generic title) and skip items checked within the last 1 hour
+      // - If user clicked "เช็คทั้งหมด" (forceAll = true): check all items that are not already 'available' (or all if none waiting)
+      let queue = mangas.filter(m => {
+        if (isGenericTitle(m.title)) return true;
+        if (m.status === 'available') return false;
+        if (!forceAll && m.lastChecked && (now - m.lastChecked < ONE_HOUR_MS) && m.status !== 'error') {
+          return false;
+        }
+        return true;
+      });
+
+      if (queue.length === 0 && forceAll) {
+        // If user explicitly clicked "เช็คทั้งหมด" and everything was skipped/available, check waiting/error ones or all
+        queue = mangas.filter(m => m.status !== 'available');
+        if (queue.length === 0) queue = [...mangas];
+      }
+
+      if (queue.length === 0) {
+        document.getElementById('lastCheckedGlobal').textContent = `เช็คล่าสุดเมื่อ ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} (ครบกำหนดเช็คใหม่ใน 1 ชม.)`;
+        return;
+      }
+
       const btn = document.getElementById('checkAllBtn');
       const icon = document.getElementById('checkAllIcon');
       btn.disabled = true;
       icon.classList.add('animate-spin');
 
-      for (const m of mangas) {
-        await checkSingleManga(m.id, true);
+      const total = queue.length;
+      let done = 0;
+
+      // Process in gentle batches of 2 with 1.2s delay between batches to handle 100+ mangas without 429 rate-limits!
+      const BATCH_SIZE = 2;
+      for (let i = 0; i < queue.length; i += BATCH_SIZE) {
+        const batch = queue.slice(i, i + BATCH_SIZE);
+        document.getElementById('lastCheckedGlobal').textContent = `กำลังทยอยเช็ค (${done + 1}-${Math.min(done + batch.length, total)} จาก ${total} เรื่อง)...`;
+        await Promise.all(batch.map(m => checkSingleManga(m.id, true)));
+        done += batch.length;
+        if (i + BATCH_SIZE < queue.length) {
+          await new Promise(r => setTimeout(r, 1200));
+        }
       }
 
-      if (pushAfter) {
-        pushToCloud();
-      }
+      // Push updated state to cloud once at the end of the queue
+      saveMangas(true);
 
       btn.disabled = false;
       icon.classList.remove('animate-spin');
-      document.getElementById('lastCheckedGlobal').textContent = `เช็คล่าสุดเมื่อ ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}`;
+      document.getElementById('lastCheckedGlobal').textContent = `เช็คล่าสุดเมื่อ ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} (ออโต้ทุก 1 ชม.)`;
 
       const availCount = mangas.filter(m => m.status === 'available').length;
       if (availCount > 0) {
         showToast(`🎉 มีมังงะตอนใหม่มาแล้ว ${availCount} เรื่อง!`);
-      } else {
+      } else if (forceAll) {
         showToast('เช็คครบทุกเรื่องแล้ว ยังไม่มีตอนใหม่เพิ่ม');
       }
     }
@@ -1015,7 +1052,9 @@
     async function pushToCloud() {
       if (!syncKey) return false;
       const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
-      // Compact payload so 15+ mangas stay well under ntfy 4096-byte message limit
+      const batchId = localUpdatedAt || Date.now();
+
+      // Compact items
       const compactMangas = mangas.map(m => ({
         i: m.id,
         t: m.title,
@@ -1024,20 +1063,46 @@
         n: m.nextChapter,
         nu: m.nextUrl,
         s: m.status === 'checking' ? 'waiting' : (m.status || 'waiting'),
+        lc: m.lastChecked || 0,
         ca: m.createdAt || Date.now()
       }));
-      const bodyStr = JSON.stringify({ updatedAt: localUpdatedAt || Date.now(), mangas: compactMangas });
 
-      const results = await Promise.allSettled(
-        NTFY_SERVERS.map(server =>
-          fetch(`${server}/${topic}`, {
-            method: 'POST',
-            body: bodyStr,
-            signal: AbortSignal.timeout(6000)
-          }).then(r => r.ok)
-        )
-      );
-      return results.some(r => r.status === 'fulfilled' && r.value === true);
+      // Split into chunks of 18 items so even 100-500 mangas never exceed ntfy's 4096-byte message limit!
+      const CHUNK_SIZE = 18;
+      const chunks = [];
+      if (compactMangas.length === 0) {
+        chunks.push([]);
+      } else {
+        for (let i = 0; i < compactMangas.length; i += CHUNK_SIZE) {
+          chunks.push(compactMangas.slice(i, i + CHUNK_SIZE));
+        }
+      }
+
+      const totalParts = chunks.length;
+      let anySuccess = false;
+
+      for (let partIdx = 0; partIdx < totalParts; partIdx++) {
+        const bodyStr = JSON.stringify({
+          updatedAt: batchId,
+          part: partIdx,
+          totalParts,
+          mangas: chunks[partIdx]
+        });
+
+        const results = await Promise.allSettled(
+          NTFY_SERVERS.map(server =>
+            fetch(`${server}/${topic}`, {
+              method: 'POST',
+              body: bodyStr,
+              signal: AbortSignal.timeout(6000)
+            }).then(r => r.ok)
+          )
+        );
+        if (results.some(r => r.status === 'fulfilled' && r.value === true)) {
+          anySuccess = true;
+        }
+      }
+      return anySuccess;
     }
 
     function expandMangaItem(x) {
@@ -1052,7 +1117,7 @@
         nextUrl: x.nu || '',
         status: x.s || 'waiting',
         statusNote: '',
-        lastChecked: Date.now(),
+        lastChecked: x.lc || 0,
         createdAt: x.ca || Date.now()
       };
     }
@@ -1073,7 +1138,8 @@
           )
         );
 
-        let latestPayload = null;
+        // Group messages by batch updatedAt to support multi-part chunked payloads (100+ mangas)
+        const batches = new Map();
         let anyServerOk = false;
 
         for (const res of responses) {
@@ -1086,11 +1152,14 @@
                 if (evt.event === 'message' && evt.message && !evt.attachment) {
                   const parsedMsg = JSON.parse(evt.message);
                   if (parsedMsg && Array.isArray(parsedMsg.mangas)) {
-                    const msgTime = Number(parsedMsg.updatedAt || (evt.time ? evt.time * 1000 : 0));
-                    parsedMsg.updatedAt = msgTime;
-                    if (!latestPayload || msgTime >= (latestPayload.updatedAt || 0)) {
-                      latestPayload = parsedMsg;
+                    const batchId = Number(parsedMsg.updatedAt || (evt.time ? evt.time * 1000 : 0));
+                    const part = Number(parsedMsg.part || 0);
+                    const totalParts = Number(parsedMsg.totalParts || 1);
+
+                    if (!batches.has(batchId)) {
+                      batches.set(batchId, { updatedAt: batchId, totalParts, parts: new Map() });
                     }
+                    batches.get(batchId).parts.set(part, parsedMsg.mangas);
                   }
                 }
               } catch (err) {}
@@ -1100,17 +1169,26 @@
 
         if (!anyServerOk) throw new Error('เชื่อมต่อ Cloud ไม่สำเร็จ');
 
-        if (latestPayload && Array.isArray(latestPayload.mangas)) {
-          const cloudTime = Number(latestPayload.updatedAt || 0);
-          // CRITICAL FIX: Only overwrite local mangas if Cloud is newer than local, OR user explicitly clicked "Pull from Cloud"
+        // Find the newest complete batch
+        const sortedBatches = Array.from(batches.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+        let latestComplete = sortedBatches.find(b => b.parts.size >= b.totalParts) || sortedBatches[0] || null;
+
+        if (latestComplete) {
+          const combinedRaw = [];
+          for (let p = 0; p < latestComplete.totalParts; p++) {
+            if (latestComplete.parts.has(p)) {
+              combinedRaw.push(...latestComplete.parts.get(p));
+            }
+          }
+
+          const cloudTime = Number(latestComplete.updatedAt || 0);
           if (forceOverwriteLocal || mangas.length === 0 || cloudTime >= localUpdatedAt) {
-            mangas = latestPayload.mangas.map(expandMangaItem);
+            mangas = combinedRaw.map(expandMangaItem);
             localUpdatedAt = cloudTime || Date.now();
             localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
             localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
             renderMangaList();
           } else {
-            // Local machine has newer changes (e.g. you just added/deleted items and refreshed before cloud updated) -> push local to cloud!
             await pushToCloud();
           }
           if (showFeedback && msg) {
@@ -1118,7 +1196,6 @@
           }
           if (showFeedback) showToast('☁️ ซิงค์ข้อมูลจาก Cloud เรียบร้อย');
         } else {
-          // If no data on cloud yet, push current local data to initialize it
           localUpdatedAt = Date.now();
           localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
           await pushToCloud();
@@ -1475,10 +1552,16 @@
         await pullFromCloud(false, isInitialPairing);
       }
 
-      // Auto-check all mangas on startup if there are any
+      // Auto-check mangas on startup (respecting 1-hour cooldown!) and set hourly auto-refresh timer
       if (mangas.length > 0) {
-        checkAllMangas();
+        checkAllMangas(false);
       }
+
+      setInterval(() => {
+        if (mangas.length > 0) {
+          checkAllMangas(false);
+        }
+      }, ONE_HOUR_MS);
     });
   </script>
 </body>
