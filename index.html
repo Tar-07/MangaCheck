@@ -688,6 +688,24 @@
       };
     }
 
+    function normalizeTitleForCheck(str) {
+      return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    }
+
+    function getSeriesBaseKey(urlStr, chapStr) {
+      try {
+        const u = new URL(urlStr);
+        const host = u.hostname.replace(/^www\./, '');
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (host.includes('nekopost.net') && parts.length >= 2 && /^\d+$/.test(parts[1])) {
+          return `${host}/${parts[0]}/${parts[1]}`;
+        }
+        return `${host}${decodeURI(u.pathname)}`.replace(new RegExp(`${chapStr}([^0-9]*)$`), '#$1');
+      } catch (e) {
+        return urlStr;
+      }
+    }
+
     async function checkSingleManga(id, silent = false) {
       const idx = mangas.findIndex(m => m.id === id);
       if (idx === -1) return;
@@ -701,18 +719,15 @@
         const probe = await fetchViaCorsProxy(item.nextUrl);
         let verdict = analyzeIfChapterExists(probe, item);
 
-        // Auto-update generic/guessed title if real Thai/English title is detected from the page!
-        if (verdict.detectedSeriesTitle && isGenericTitle(mangas[idx].title)) {
-          mangas[idx].title = verdict.detectedSeriesTitle;
-        }
+        let detectedTitle = verdict.detectedSeriesTitle || '';
 
         // Step 2: If Next URL didn't clearly verify OR title is still generic, check Current URL page
         if (!verdict.exists || isGenericTitle(mangas[idx].title)) {
           try {
             const currentProbe = await fetchViaCorsProxy(item.currentUrl);
             const currentTitle = extractTitleFromProbe(currentProbe);
-            if (currentTitle && isGenericTitle(mangas[idx].title)) {
-              mangas[idx].title = currentTitle;
+            if (!detectedTitle && currentTitle) {
+              detectedTitle = currentTitle;
             }
             if (!verdict.exists) {
               const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
@@ -724,6 +739,20 @@
               }
             }
           } catch (e) {}
+        }
+
+        // Auto-update generic/guessed title if real Thai/English title is detected from the page!
+        if (detectedTitle && isGenericTitle(mangas[idx].title)) {
+          // Check if the newly fetched real title duplicates an existing item in the list
+          const dup = mangas.find(m => m.id !== id && !isGenericTitle(m.title) && normalizeTitleForCheck(m.title) === normalizeTitleForCheck(detectedTitle));
+          if (dup) {
+            mangas = mangas.filter(m => m.id !== id);
+            saveMangas(true);
+            renderMangaList();
+            showToast(`⚠️ เรื่อง "${detectedTitle}" มีอยู่ในรายการแล้ว ระบบจึงไม่เพิ่มซ้ำครับ`);
+            return;
+          }
+          mangas[idx].title = detectedTitle;
         }
 
         mangas[idx].status = verdict.exists ? 'available' : 'waiting';
@@ -793,11 +822,26 @@
       }
 
       const title = titleInput.value.trim() || parsed.guessedTitle;
-      const coverUrl = coverInput ? coverInput.value.trim() : '';
+
+      // Check for duplicate series URL or duplicate title before adding
+      const newBaseKey = getSeriesBaseKey(parsed.originalUrl, parsed.currentChapter);
+      const duplicateItem = mangas.find(m => {
+        const existingBaseKey = getSeriesBaseKey(m.currentUrl, m.currentChapter);
+        if (newBaseKey && existingBaseKey && newBaseKey === existingBaseKey) return true;
+        if (!isGenericTitle(title) && !isGenericTitle(m.title)) {
+          return normalizeTitleForCheck(m.title) === normalizeTitleForCheck(title);
+        }
+        return false;
+      });
+
+      if (duplicateItem) {
+        showToast(`⚠️ เรื่อง "${duplicateItem.title}" มีอยู่ในรายการแล้ว ระบบจึงไม่เพิ่มซ้ำครับ`);
+        return;
+      }
+
       const newItem = {
         id: 'm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         title,
-        coverUrl,
         currentUrl: parsed.originalUrl,
         currentChapter: parsed.currentChapter,
         nextChapter: parsed.nextChapter,
@@ -876,6 +920,14 @@
 
       const newTitle = document.getElementById('editTitleInput').value.trim();
       const newNextChap = document.getElementById('editNextChapInput').value.trim();
+
+      if (newTitle) {
+        const dup = mangas.find(m => m.id !== id && normalizeTitleForCheck(m.title) === normalizeTitleForCheck(newTitle));
+        if (dup) {
+          showToast(`⚠️ มีเรื่องชื่อ "${dup.title}" อยู่ในรายการแล้ว`);
+          return;
+        }
+      }
 
       const oldNextChap = mangas[idx].nextChapter;
       if (newTitle) mangas[idx].title = newTitle;
