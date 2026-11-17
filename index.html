@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MangaCheck — เช็คมังงะตอนถัดไป</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Kanit', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      font-family: 'Kanit', sans-serif;
+    }
+    .glass {
+      background: rgba(17, 24, 39, 0.78);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .pulse-badge {
+      animation: pulse-ring 2s infinite;
+    }
+    @keyframes pulse-ring {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+      50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navbar -->
+  <header class="sticky top-0 z-30 glass border-b border-slate-800/80">
+    <div class="max-w-4xl mx-auto px-4 py-3.5 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white leading-none">MangaCheck</h1>
+          <p class="text-xs text-slate-400 mt-0.5">เช็คมังงะตอนถัดไปอัตโนมัติ (PC & มือถือ)</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <!-- Cloud Sync Button -->
+        <button onclick="openSyncModal()" id="syncStatusBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700/80">
+          <span id="syncDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span id="syncText">ซิงค์ข้อมูล</span>
+        </button>
+
+        <!-- Check All Button -->
+        <button onclick="checkAllMangas()" id="checkAllBtn" class="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 flex items-center gap-1.5 transition active:scale-95">
+          <svg id="checkAllIcon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>เช็คทั้งหมด</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6">
+
+    <!-- Add Manga Card -->
+    <section class="glass rounded-2xl p-4 sm:p-5 shadow-xl">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+          เพิ่มมังงะ / วางลิ้งค์ตอนที่อ่านล่าสุด
+        </h2>
+        <span class="text-[11px] text-slate-400">ระบบจะเดาเลขตอนถัดไปให้อัตโนมัติ</span>
+      </div>
+
+      <form id="addMangaForm" onsubmit="handleAddManga(event)" class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <div class="sm:col-span-8">
+            <label class="block text-xs text-slate-400 mb-1">ลิ้งค์ตอนล่าสุดที่อ่าน (URL) <span class="text-rose-400">*</span></label>
+            <input
+              type="url"
+              id="mangaUrlInput"
+              required
+              placeholder="เช่น https://example-manga.com/one-piece-chapter-1100/"
+              oninput="onUrlInputPreview(this.value)"
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+            />
+          </div>
+          <div class="sm:col-span-4">
+            <label class="block text-xs text-slate-400 mb-1">ชื่อเรื่อง (เว้นว่างให้เดาจากลิ้งค์ได้)</label>
+            <input
+              type="text"
+              id="mangaTitleInput"
+              placeholder="เช่น One Piece"
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+            />
+          </div>
+        </div>
+
+        <!-- Live Next URL Preview -->
+        <div id="urlPreviewBox" class="hidden rounded-xl bg-slate-900/70 border border-slate-800 px-3.5 py-2.5 text-xs space-y-1">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-slate-400">
+              ตอนปัจจุบันที่ตรวจพบ: <span id="previewCurrentChap" class="font-semibold text-indigo-400">-</span>
+              <span class="mx-1.5 text-slate-600">→</span>
+              ตอนถัดไปที่จะเช็ค: <span id="previewNextChap" class="font-semibold text-emerald-400">-</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-slate-400">ปรับเลขตอนถัดไปเอง:</label>
+              <input
+                type="text"
+                id="customNextChapInput"
+                oninput="updateCustomNextPreview()"
+                class="w-16 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-emerald-300 text-xs text-center focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+          <div class="text-[11px] text-slate-500 truncate">
+            ลิ้งค์ตอนถัดไป: <span id="previewNextUrl" class="text-slate-300 font-mono">-</span>
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-1">
+          <button
+            type="submit"
+            class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-medium shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 transition active:scale-98"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            <span>เพิ่มและเช็คตอนถัดไปทันที</span>
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Filter & Stats Bar -->
+    <section class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs">
+        <button onclick="setFilter('all')" id="filter-all" class="px-3 py-1.5 rounded-lg font-medium transition bg-indigo-600 text-white">
+          ทั้งหมด (<span id="count-all">0</span>)
+        </button>
+        <button onclick="setFilter('available')" id="filter-available" class="px-3 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">
+          มาแล้ว! (<span id="count-available">0</span>)
+        </button>
+        <button onclick="setFilter('waiting')" id="filter-waiting" class="px-3 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">
+          รอตอนใหม่ (<span id="count-waiting">0</span>)
+        </button>
+      </div>
+
+      <div class="text-xs text-slate-400 flex items-center gap-2">
+        <span id="lastCheckedGlobal">พร้อมเช็คสถานะ</span>
+      </div>
+    </section>
+
+    <!-- Manga List Container -->
+    <section id="mangaListContainer" class="space-y-3">
+      <!-- Dynamic Cards Rendered Here -->
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="max-w-4xl w-full mx-auto px-4 py-6 text-center text-xs text-slate-500 border-t border-slate-800/60 mt-8">
+    <p>MangaCheck — ทำงานผ่าน Browser 100% ไม่ต้องเปิดคอมค้าง ซิงค์ข้อมูลข้ามมือถือและคอมได้ฟรี</p>
+  </footer>
+
+  <!-- Cloud Sync & Backup Modal -->
+  <div id="syncModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div class="glass rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-700/80 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            ☁️ ซิงค์ข้อมูลข้ามอุปกรณ์ (มือถือ & คอม)
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">ไม่ต้องเช่าเซิร์ฟเวอร์ ไม่ต้องเปิดคอมค้าง</p>
+        </div>
+        <button onclick="closeSyncModal()" class="text-slate-400 hover:text-white p-1">✕</button>
+      </div>
+
+      <!-- Mode 1: Free Cloud Sync Room (ntfy.sh / JSON Storage or KV) -->
+      <div class="space-y-3 bg-slate-900/90 p-4 rounded-xl border border-slate-800">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">วิธีที่ 1: รหัสซิงค์อัตโนมัติ (Cloud Sync Key)</span>
+          <span class="text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">แนะนำ • ฟรี</span>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          เพียงกด <b>"สร้างรหัสซิงค์ใหม่"</b> แล้วนำรหัสนี้ไปกรอกในมือถือหรือคอมอีกเครื่อง ข้อมูลมังงะจะซิงค์หากันอัตโนมัติทุกครั้งที่เปิดเว็บหรือกดอัพเดท!
+        </p>
+
+        <div class="flex gap-2">
+          <input
+            type="text"
+            id="syncKeyInput"
+            placeholder="วางรหัสซิงค์ที่นี่ หรือกดสร้างใหม่..."
+            class="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+          />
+          <button onclick="generateNewSyncKey()" id="btnGenSync" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 whitespace-nowrap transition">
+            สร้างรหัสใหม่
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div class="flex gap-2">
+            <button onclick="saveAndConnectSyncKey()" class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition">
+              บันทึก & ซิงค์ตอนนี้
+            </button>
+            <button onclick="copySyncLink()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition">
+              📋 คัดลอกลิ้งค์เปิดในมือถือ
+            </button>
+          </div>
+          <button onclick="disconnectSyncKey()" class="text-[11px] text-rose-400 hover:underline">
+            ยกเลิกการผูก
+          </button>
+        </div>
+        <p id="syncModalMsg" class="text-[11px] text-slate-400"></p>
+      </div>
+
+      <!-- Mode 2: Export / Import JSON -->
+      <div class="space-y-2.5 bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
+        <span class="text-xs font-semibold text-slate-300">วิธีที่ 2: สำรองข้อมูลด้วยข้อความ / ไฟล์ (ไม่ต้องพึ่งเน็ต)</span>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="exportDataToClipboard()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700">
+            📤 คัดลอกข้อมูลทั้งหมด
+          </button>
+          <button onclick="importDataFromPrompt()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700">
+            📥 นำเข้าข้อมูลที่คัดลอกมา
+          </button>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-1">
+        <button onclick="closeSyncModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-white">
+          ปิดหน้าต่าง
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white shadow-2xl flex items-center gap-2">
+    <span id="toastText"></span>
+  </div>
+
+  <script>
+    // ==========================================
+    // 1. STATE & STORAGE
+    // ==========================================
+    const STORAGE_KEY = 'mangacheck_items_v1';
+    const SYNC_KEY_STORAGE = 'mangacheck_sync_key_v1';
+
+    let mangas = [];
+    let currentFilter = 'all';
+    let syncKey = localStorage.getItem(SYNC_KEY_STORAGE) || '';
+
+    // ==========================================
+    // 2. URL PATTERN & NEXT CHAPTER GUESSER
+    // ==========================================
+    /**
+     * Parses a manga chapter URL, extracts the chapter number,
+     * and generates the predicted URL for the next chapter.
+     */
+    function parseMangaUrl(rawUrl, customNextNum = null) {
+      try {
+        const urlStr = rawUrl.trim();
+        if (!urlStr) return null;
+
+        // Decode URI safely so Thai slugs look readable and regex works cleanly
+        let decoded = urlStr;
+        try { decoded = decodeURI(urlStr); } catch (e) {}
+
+        // Common patterns in manga URLs:
+        // 1. ?chapter=10 or &ep=10 or &ch=10
+        // 2. /chapter-10/ or /chap-10/ or /ch-10/ or /ep-10/ or /ตอนที่-10/
+        // 3. Last number in the pathname before trailing slash or .html
+        const patterns = [
+          // Explicit keywords (chapter, chap, ch, ep, episode, ตอนที่, ตอน)
+          /(.*?(?:chapter|chap|ch|episode|ep|ตอนที่|ตอน)[-_=\/\s%]*)(\d+(?:\.\d+)?)([^0-9]*)$/i,
+          // Query parameter numbers like ?id=123&no=45
+          /(.*?[?&](?:no|num|c|ep_no)=)(\d+(?:\.\d+)?)([^0-9]*)$/i,
+          // Last number segment in URL path
+          /(.*?)(\d+(?:\.\d+)?)(\/?(?:\.html|\.php)?(?:\?.*)?)$/i
+        ];
+
+        for (const regex of patterns) {
+          const match = decoded.match(regex);
+          if (match) {
+            const prefix = match[1];
+            const currentNumStr = match[2];
+            const suffix = match[3];
+
+            // Compute next integer chapter (if current is 10.5 -> 11, if 10 -> 11)
+            const currentFloat = parseFloat(currentNumStr);
+            let nextNum;
+            if (customNextNum !== null && String(customNextNum).trim() !== '') {
+              nextNum = String(customNextNum).trim();
+            } else {
+              const nextInt = Number.isInteger(currentFloat) ? currentFloat + 1 : Math.floor(currentFloat) + 1;
+              // Preserve leading zeros if any (e.g. "005" -> "006")
+              if (currentNumStr.startsWith('0') && !currentNumStr.includes('.')) {
+                nextNum = String(nextInt).padStart(currentNumStr.length, '0');
+              } else {
+                nextNum = String(nextInt);
+              }
+            }
+
+            const nextDecodedUrl = `${prefix}${nextNum}${suffix}`;
+            let nextUrl = nextDecodedUrl;
+            try { nextUrl = encodeURI(nextDecodedUrl); } catch (e) {}
+
+            return {
+              originalUrl: urlStr,
+              currentChapter: currentNumStr,
+              nextChapter: nextNum,
+              nextUrl: nextUrl,
+              guessedTitle: guessTitleFromUrl(decoded)
+            };
+          }
+        }
+
+        return null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function guessTitleFromUrl(decodedUrl) {
+      try {
+        const u = new URL(decodedUrl);
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (parts.length === 0) return u.hostname;
+
+        // Pick the most descriptive slug segment
+        let slug = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+        // If last segment is just "chapter-10", use parent segment
+        if (/^(?:chapter|chap|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+$/i.test(slug) && parts.length >= 2) {
+          slug = parts[parts.length - 2];
+        }
+
+        // Strip trailing chapter suffix from slug
+        slug = slug
+          .replace(/[-_]*(?:chapter|chap|ch|ep|episode|ตอนที่|ตอน)[-_]*\d+(?:[-_.]\d+)?.*$/i, '')
+          .replace(/[-_]+\d+$/, '')
+          .replace(/[-_]+/g, ' ')
+          .trim();
+
+        if (!slug) return u.hostname.replace(/^www\./, '');
+        // Capitalize words
+        return slug.replace(/\b\w/g, c => c.toUpperCase());
+      } catch (e) {
+        return 'มังงะเรื่องใหม่';
+      }
+    }
+
+    // Live UI preview when pasting URL
+    let lastPreviewCurrentChap = null;
+    function onUrlInputPreview(val) {
+      const box = document.getElementById('urlPreviewBox');
+      const customInput = document.getElementById('customNextChapInput');
+      const parsed = parseMangaUrl(val);
+
+      if (!parsed) {
+        box.classList.add('hidden');
+        lastPreviewCurrentChap = null;
+        return;
+      }
+
+      box.classList.remove('hidden');
+      if (lastPreviewCurrentChap !== parsed.currentChapter) {
+        customInput.value = parsed.nextChapter;
+        lastPreviewCurrentChap = parsed.currentChapter;
+      }
+
+      const finalParsed = parseMangaUrl(val, customInput.value);
+      document.getElementById('previewCurrentChap').textContent = `ตอนที่ ${finalParsed.currentChapter}`;
+      document.getElementById('previewNextChap').textContent = `ตอนที่ ${finalParsed.nextChapter}`;
+      document.getElementById('previewNextUrl').textContent = finalParsed.nextUrl;
+
+      const titleInput = document.getElementById('mangaTitleInput');
+      if (!titleInput.dataset.userTyped) {
+        titleInput.placeholder = `เช่น ${finalParsed.guessedTitle}`;
+      }
+    }
+
+    function updateCustomNextPreview() {
+      const val = document.getElementById('mangaUrlInput').value;
+      const customVal = document.getElementById('customNextChapInput').value;
+      const finalParsed = parseMangaUrl(val, customVal);
+      if (finalParsed) {
+        document.getElementById('previewNextChap').textContent = `ตอนที่ ${finalParsed.nextChapter}`;
+        document.getElementById('previewNextUrl').textContent = finalParsed.nextUrl;
+      }
+    }
+
+    // ==========================================
+    // 3. CHAPTER AVAILABILITY CHECKER (NO SERVER)
+    // ==========================================
+    /**
+     * Checks whether the predicted `nextUrl` is live and valid,
+     * OR if the `currentUrl` page now contains a link to `nextUrl`.
+     * Uses multiple free CORS proxies with fallback so it works 100% on Static Hosting / Mobile.
+     */
+    async function fetchViaCorsProxy(targetUrl) {
+      const proxies = [
+        // 1. AllOrigins JSON wrapper (gives status + contents + final url)
+        async (url) => {
+          const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}&disableCache=true`, {
+            signal: AbortSignal.timeout(10000)
+          });
+          if (!res.ok) throw new Error('Proxy 1 failed');
+          const data = await res.json();
+          return {
+            html: data.contents || '',
+            httpCode: data.status?.http_code || 200,
+            finalUrl: data.status?.url || url
+          };
+        },
+        // 2. CodeTabs Proxy fallback
+        async (url) => {
+          const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, {
+            signal: AbortSignal.timeout(10000)
+          });
+          if (!res.ok) throw new Error('Proxy 2 failed');
+          const text = await res.text();
+          return {
+            html: text,
+            httpCode: res.status,
+            finalUrl: url
+          };
+        },
+        // 3. Corsproxy.io fallback
+        async (url) => {
+          const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, {
+            signal: AbortSignal.timeout(10000)
+          });
+          const text = await res.text();
+          return {
+            html: text,
+            httpCode: res.status,
+            finalUrl: url
+          };
+        }
+      ];
+
+      let lastErr = null;
+      for (const proxyFn of proxies) {
+        try {
+          const result = await proxyFn(targetUrl);
+          if (result && typeof result.html === 'string') {
+            return result;
+          }
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw lastErr || new Error('ไม่สามารถเชื่อมต่อเว็บปลายทางได้');
+    }
+
+    function analyzeIfChapterExists(probeResult, item) {
+      const { html, httpCode, finalUrl } = probeResult;
+      if (httpCode === 404 || httpCode >= 500) {
+        return { exists: false, reason: `HTTP ${httpCode} (ยังไม่มีหน้านี้)` };
+      }
+
+      if (!html || html.length < 200) {
+        return { exists: false, reason: 'หน้าเว็บว่างเปล่า' };
+      }
+
+      // Extract <title>
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+
+      // 1. Check 404 / Not Found indicators in title or body
+      const notFoundRegex = /(404\s*not\s*found|page\s*not\s*found|ไม่พบหน้า|ไม่พบเนื้อหา|ไม่พบตอนที่|ยังไม่มีตอน|error\s*404|nothing\s*found)/i;
+      if (notFoundRegex.test(pageTitle)) {
+        return { exists: false, reason: 'หน้าเว็บแจ้งว่าไม่พบหน้า (404)' };
+      }
+
+      // 2. Check if redirected back to main manga page or homepage (common in WordPress Madara / MangaThemesia)
+      // When a chapter doesn't exist, many manga sites redirect `/manga-name-chapter-11/` -> `/manga/manga-name/` or `/`
+      const nextNumEscaped = String(item.nextChapter).replace('.', '\\.');
+      const chapNumInFinalUrl = new RegExp(`(^|[^0-9])${nextNumEscaped}([^0-9]|$)`);
+      if (finalUrl && !chapNumInFinalUrl.test(decodeURI(finalUrl))) {
+        return { exists: false, reason: 'ลิ้งค์ถูกดีดกลับหน้าหลัก (ตอนยังไม่มา)' };
+      }
+
+      // 3. Check if the <title> or canonical/heading actually mentions the next chapter number
+      // OR if the page has actual manga reader images / chapter navigation
+      const chapNumInTitle = new RegExp(`(^|[^0-9])${nextNumEscaped}([^0-9]|$)`);
+      const hasReaderIndicators = /(wp-manga-chapter-img|reading-content|chapter-content|readerarea|ts-main-image|page-break|select-pagination)/i.test(html);
+
+      if (chapNumInTitle.test(pageTitle)) {
+        return {
+          exists: true,
+          reason: `ตรวจพบหน้า "${pageTitle.slice(0, 60)}"`
+        };
+      }
+
+      if (hasReaderIndicators && !notFoundRegex.test(html.slice(0, 4000))) {
+        return {
+          exists: true,
+          reason: 'ตรวจพบหน้าอ่านมังงะของตอนถัดไป'
+        };
+      }
+
+      return {
+        exists: false,
+        reason: 'ยังไม่พบเนื้อหาของตอนที่ ' + item.nextChapter
+      };
+    }
+
+    async function checkSingleManga(id, silent = false) {
+      const idx = mangas.findIndex(m => m.id === id);
+      if (idx === -1) return;
+
+      mangas[idx].status = 'checking';
+      renderMangaList();
+
+      const item = mangas[idx];
+      try {
+        // Step 1: Probe predicted Next URL directly
+        const probe = await fetchViaCorsProxy(item.nextUrl);
+        let verdict = analyzeIfChapterExists(probe, item);
+
+        // Step 2: If Next URL didn't clearly verify, also check if Current URL page has a direct link to nextUrl's path
+        if (!verdict.exists) {
+          try {
+            const currentProbe = await fetchViaCorsProxy(item.currentUrl);
+            const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
+            if (nextPath.length > 4 && (currentProbe.html.includes(nextPath) || decodeURI(currentProbe.html).includes(decodeURI(nextPath)))) {
+              verdict = {
+                exists: true,
+                reason: 'พบปุ่ม/ลิ้งค์ตอนถัดไปปรากฏในหน้าตอนปัจจุบันแล้ว!'
+              };
+            }
+          } catch (e) {}
+        }
+
+        mangas[idx].status = verdict.exists ? 'available' : 'waiting';
+        mangas[idx].statusNote = verdict.reason;
+        mangas[idx].lastChecked = Date.now();
+      } catch (err) {
+        mangas[idx].status = 'error';
+        mangas[idx].statusNote = 'เว็บปลายทางบล็อกการเช็คอัตโนมัติ (กดปุ่ม "เปิดลองเช็คเอง" ได้เลย)';
+        mangas[idx].lastChecked = Date.now();
+      }
+
+      saveMangas();
+      renderMangaList();
+      if (!silent) {
+        if (mangas[idx].status === 'available') {
+          showToast(`🎉 "${mangas[idx].title}" ตอนที่ ${mangas[idx].nextChapter} มาแล้ว!`);
+        }
+      }
+    }
+
+    async function checkAllMangas() {
+      if (mangas.length === 0) {
+        showToast('ยังไม่มีรายการมังงะให้เช็ค');
+        return;
+      }
+      const btn = document.getElementById('checkAllBtn');
+      const icon = document.getElementById('checkAllIcon');
+      btn.disabled = true;
+      icon.classList.add('animate-spin');
+
+      for (const m of mangas) {
+        await checkSingleManga(m.id, true);
+      }
+
+      btn.disabled = false;
+      icon.classList.remove('animate-spin');
+      document.getElementById('lastCheckedGlobal').textContent = `เช็คล่าสุดเมื่อ ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}`;
+
+      const availCount = mangas.filter(m => m.status === 'available').length;
+      if (availCount > 0) {
+        showToast(`🎉 มีมังงะตอนใหม่มาแล้ว ${availCount} เรื่อง!`);
+      } else {
+        showToast('เช็คครบทุกเรื่องแล้ว ยังไม่มีตอนใหม่เพิ่ม');
+      }
+    }
+
+    // ==========================================
+    // 4. CRUD ACTIONS (ADD, ADVANCE, EDIT, DELETE)
+    // ==========================================
+    async function handleAddManga(e) {
+      e.preventDefault();
+      const urlInput = document.getElementById('mangaUrlInput');
+      const titleInput = document.getElementById('mangaTitleInput');
+      const customNextInput = document.getElementById('customNextChapInput');
+
+      const rawUrl = urlInput.value.trim();
+      const parsed = parseMangaUrl(rawUrl, customNextInput.value);
+
+      if (!parsed) {
+        alert('ไม่สามารถหาเลขตอนจากลิ้งค์นี้ได้ กรุณาตรวจสอบว่าลิ้งค์มีเลขตอน เช่น /chapter-10/ หรือ /ตอนที่-10/');
+        return;
+      }
+
+      const title = titleInput.value.trim() || parsed.guessedTitle;
+      const newItem = {
+        id: 'm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        title,
+        currentUrl: parsed.originalUrl,
+        currentChapter: parsed.currentChapter,
+        nextChapter: parsed.nextChapter,
+        nextUrl: parsed.nextUrl,
+        status: 'checking',
+        statusNote: 'กำลังเช็คตอนถัดไป...',
+        lastChecked: Date.now(),
+        createdAt: Date.now()
+      };
+
+      mangas.unshift(newItem);
+      saveMangas();
+      renderMangaList();
+
+      // Reset form
+      urlInput.value = '';
+      titleInput.value = '';
+      delete titleInput.dataset.userTyped;
+      document.getElementById('urlPreviewBox').classList.add('hidden');
+      lastPreviewCurrentChap = null;
+
+      await checkSingleManga(newItem.id);
+    }
+
+    // When user clicks "อ่านตอนที่ X แล้ว -> เลื่อนไปรอตอน X+1"
+    async function markAsReadAndAdvance(id) {
+      const idx = mangas.findIndex(m => m.id === id);
+      if (idx === -1) return;
+
+      const item = mangas[idx];
+      const nextParsed = parseMangaUrl(item.nextUrl);
+      if (!nextParsed) {
+        showToast('เลื่อนเลขตอนอัตโนมัติไม่ได้ กรุณาแก้ไขลิ้งค์ด้วยตัวเอง');
+        return;
+      }
+
+      mangas[idx].currentUrl = item.nextUrl;
+      mangas[idx].currentChapter = item.nextChapter;
+      mangas[idx].nextChapter = nextParsed.nextChapter;
+      mangas[idx].nextUrl = nextParsed.nextUrl;
+      mangas[idx].status = 'checking';
+      mangas[idx].statusNote = 'กำลังเช็คตอนถัดไป...';
+
+      saveMangas();
+      renderMangaList();
+      showToast(`เลื่อน "${item.title}" เป็นอ่านถึงตอนที่ ${mangas[idx].currentChapter} แล้ว`);
+      await checkSingleManga(id);
+    }
+
+    function editNextChapterPrompt(id) {
+      const idx = mangas.findIndex(m => m.id === id);
+      if (idx === -1) return;
+      const item = mangas[idx];
+
+      const newNextChap = prompt(`ระบุเลขตอนถัดไปที่ต้องการเช็คสำหรับ "${item.title}":`, item.nextChapter);
+      if (newNextChap === null || !newNextChap.trim()) return;
+
+      const reparsed = parseMangaUrl(item.currentUrl, newNextChap.trim());
+      if (reparsed) {
+        mangas[idx].nextChapter = reparsed.nextChapter;
+        mangas[idx].nextUrl = reparsed.nextUrl;
+        saveMangas();
+        renderMangaList();
+        checkSingleManga(id);
+      }
+    }
+
+    function deleteManga(id) {
+      const item = mangas.find(m => m.id === id);
+      if (!item) return;
+      if (!confirm(`ลบเรื่อง "${item.title}" ออกจากรายการติดตามใช่ไหม?`)) return;
+      mangas = mangas.filter(m => m.id !== id);
+      saveMangas();
+      renderMangaList();
+      showToast('ลบรายการเรียบร้อย');
+    }
+
+    // ==========================================
+    // 5. CLOUD SYNC (CROSS-DEVICE PC & MOBILE)
+    // ==========================================
+    // Uses npoint.io / jsonblob free anonymous JSON endpoints so user needs 0 signup & 0 server
+    const CLOUD_API_BASE = 'https://jsonblob.com/api/jsonBlob';
+
+    function updateSyncStatusBadge() {
+      const dot = document.getElementById('syncDot');
+      const txt = document.getElementById('syncText');
+      if (syncKey) {
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        txt.textContent = 'ซิงค์เชื่อมอยู่';
+      } else {
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400';
+        txt.textContent = 'ซิงค์มือถือ/คอม';
+      }
+    }
+
+    async function generateNewSyncKey() {
+      const btn = document.getElementById('btnGenSync');
+      const msg = document.getElementById('syncModalMsg');
+      btn.disabled = true;
+      msg.textContent = 'กำลังสร้างรหัสซิงค์บน Cloud...';
+
+      try {
+        const res = await fetch(CLOUD_API_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ updatedAt: Date.now(), mangas })
+        });
+        // Extract Blob ID from Location header or response URL
+        const location = res.headers.get('Location') || res.headers.get('x-jsonblob') || '';
+        const blobId = location.split('/').pop();
+        if (!blobId) throw new Error('สร้างรหัสไม่สำเร็จ');
+
+        syncKey = blobId;
+        localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+        document.getElementById('syncKeyInput').value = syncKey;
+        updateSyncStatusBadge();
+        msg.innerHTML = `<span class="text-emerald-400">✅ สร้างรหัสซิงค์สำเร็จ! คัดลอกรหัสหรือลิ้งค์นี้ไปเปิดในมือถือได้เลย</span>`;
+      } catch (e) {
+        msg.innerHTML = `<span class="text-rose-400">⚠️ ไม่สามารถสร้างรหัสอัตโนมัติได้ในขณะนี้ สามารถใช้ปุ่มคัดลอกข้อมูลด้านล่างแทนได้ครับ</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function pushToCloud() {
+      if (!syncKey) return;
+      try {
+        await fetch(`${CLOUD_API_BASE}/${encodeURIComponent(syncKey)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ updatedAt: Date.now(), mangas })
+        });
+      } catch (e) {}
+    }
+
+    async function pullFromCloud(showFeedback = false) {
+      if (!syncKey) return;
+      const msg = document.getElementById('syncModalMsg');
+      try {
+        if (showFeedback && msg) msg.textContent = 'กำลังดึงข้อมูลล่าสุดจาก Cloud...';
+        const res = await fetch(`${CLOUD_API_BASE}/${encodeURIComponent(syncKey)}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) throw new Error('ไม่พบรหัสซิงค์นี้');
+        const data = await res.json();
+        if (data && Array.isArray(data.mangas)) {
+          mangas = data.mangas;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
+          renderMangaList();
+          if (showFeedback && msg) {
+            msg.innerHTML = `<span class="text-emerald-400">✅ ซิงค์ข้อมูลสำเร็จ! (${mangas.length} เรื่อง)</span>`;
+          }
+          if (showFeedback) showToast('☁️ ซิงค์ข้อมูลจาก Cloud เรียบร้อย');
+        }
+      } catch (e) {
+        if (showFeedback && msg) {
+          msg.innerHTML = `<span class="text-rose-400">⚠️ ไม่พบข้อมูลจากรหัสซิงค์นี้ กรุณาตรวจสอบรหัสอีกครั้ง</span>`;
+        }
+      }
+    }
+
+    async function saveAndConnectSyncKey() {
+      const inputVal = document.getElementById('syncKeyInput').value.trim();
+      if (!inputVal) {
+        showToast('กรุณาวางรหัสซิงค์ หรือกดปุ่ม "สร้างรหัสใหม่"');
+        return;
+      }
+      syncKey = inputVal;
+      localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+      updateSyncStatusBadge();
+      await pullFromCloud(true);
+    }
+
+    function disconnectSyncKey() {
+      syncKey = '';
+      localStorage.removeItem(SYNC_KEY_STORAGE);
+      document.getElementById('syncKeyInput').value = '';
+      document.getElementById('syncModalMsg').textContent = 'ยกเลิกการผูก Cloud Sync แล้ว';
+      updateSyncStatusBadge();
+    }
+
+    function copySyncLink() {
+      if (!syncKey) {
+        showToast('กรุณากด "สร้างรหัสใหม่" ก่อนคัดลอกลิ้งค์');
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set('sync', syncKey);
+      navigator.clipboard.writeText(url.toString());
+      showToast('📋 คัดลอกลิ้งค์ซิงค์แล้ว! ส่งเข้า Line / มือถือเพื่อเปิดได้เลย');
+    }
+
+    function exportDataToClipboard() {
+      const json = JSON.stringify(mangas, null, 2);
+      navigator.clipboard.writeText(json);
+      showToast('📤 คัดลอกข้อมูลทั้งหมดลง Clipboard แล้ว');
+    }
+
+    function importDataFromPrompt() {
+      const raw = prompt('วางข้อมูล JSON ที่คัดลอกมาจากอีกเครื่องที่นี่:');
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new Error('Invalid format');
+        mangas = parsed;
+        saveMangas();
+        renderMangaList();
+        closeSyncModal();
+        showToast(`📥 นำเข้าข้อมูลมังงะ ${mangas.length} เรื่องสำเร็จ!`);
+      } catch (e) {
+        alert('รูปแบบข้อมูลไม่ถูกต้อง');
+      }
+    }
+
+    function openSyncModal() {
+      document.getElementById('syncKeyInput').value = syncKey;
+      document.getElementById('syncModalMsg').textContent = '';
+      const modal = document.getElementById('syncModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeSyncModal() {
+      const modal = document.getElementById('syncModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    // ==========================================
+    // 6. PERSISTENCE & RENDERING
+    // ==========================================
+    function saveMangas() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
+      pushToCloud();
+    }
+
+    function loadMangas() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          mangas = JSON.parse(raw);
+        }
+      } catch (e) {
+        mangas = [];
+      }
+    }
+
+    function setFilter(f) {
+      currentFilter = f;
+      ['all', 'available', 'waiting'].forEach(k => {
+        const btn = document.getElementById(`filter-${k}`);
+        if (k === f) {
+          btn.className = 'px-3 py-1.5 rounded-lg font-medium transition bg-indigo-600 text-white';
+        } else {
+          btn.className = 'px-3 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white';
+        }
+      });
+      renderMangaList();
+    }
+
+    function renderMangaList() {
+      const container = document.getElementById('mangaListContainer');
+      const availCount = mangas.filter(m => m.status === 'available').length;
+      const waitCount = mangas.filter(m => m.status !== 'available').length;
+
+      document.getElementById('count-all').textContent = mangas.length;
+      document.getElementById('count-available').textContent = availCount;
+      document.getElementById('count-waiting').textContent = waitCount;
+
+      const filtered = mangas.filter(m => {
+        if (currentFilter === 'available') return m.status === 'available';
+        if (currentFilter === 'waiting') return m.status !== 'available';
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="glass rounded-2xl p-10 text-center space-y-3 border border-dashed border-slate-800">
+            <div class="w-12 h-12 rounded-2xl bg-slate-800/80 text-slate-400 flex items-center justify-center mx-auto text-xl">
+              📚
+            </div>
+            <div class="space-y-1">
+              <p class="text-sm font-medium text-slate-300">ยังไม่มีรายการมังงะในหมวดนี้</p>
+              <p class="text-xs text-slate-500">ก๊อปปี้ลิ้งค์มังงะตอนล่าสุดที่คุณเพิ่งอ่านจบ มาวางในช่องด้านบนได้เลย!</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(item => {
+        let statusBadge = '';
+        let cardBorder = 'border-slate-800/90';
+
+        if (item.status === 'available') {
+          cardBorder = 'border-emerald-500/50 bg-emerald-950/10';
+          statusBadge = `
+            <span class="pulse-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              ตอนที่ ${escapeHtml(item.nextChapter)} มาแล้ว!
+            </span>
+          `;
+        } else if (item.status === 'checking') {
+          statusBadge = `
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+              </svg>
+              กำลังเช็คตอนที่ ${escapeHtml(item.nextChapter)}...
+            </span>
+          `;
+        } else if (item.status === 'error') {
+          statusBadge = `
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              ⚠️ เช็คอัตโนมัติติดบล็อก (กดเปิดลิ้งค์เช็คได้)
+            </span>
+          `;
+        } else {
+          statusBadge = `
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
+              ⏳ รอตอนที่ ${escapeHtml(item.nextChapter)}
+            </span>
+          `;
+        }
+
+        const hostname = (() => {
+          try { return new URL(item.currentUrl).hostname.replace(/^www\./, ''); }
+          catch (e) { return 'เว็บมังงะ'; }
+        })();
+
+        return `
+          <div class="glass rounded-2xl p-4 sm:p-5 transition hover:border-slate-700 border ${cardBorder}">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="space-y-1.5 min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 font-mono">${escapeHtml(hostname)}</span>
+                  ${statusBadge}
+                </div>
+
+                <h3 class="text-base font-bold text-white truncate" title="${escapeHtml(item.title)}">
+                  ${escapeHtml(item.title)}
+                </h3>
+
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                  <div>
+                    อ่านล่าสุด: <a href="${escapeHtml(item.currentUrl)}" target="_blank" rel="noopener" class="text-indigo-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.currentChapter)} ↗</a>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    ลิ้งค์ตอนถัดไป:
+                    <a href="${escapeHtml(item.nextUrl)}" target="_blank" rel="noopener" class="text-emerald-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.nextChapter)} ↗</a>
+                    <button onclick="editNextChapterPrompt('${item.id}')" title="แก้เลขตอนถัดไป" class="text-slate-500 hover:text-slate-300 px-1">✏️</button>
+                  </div>
+                </div>
+
+                <p class="text-[11px] text-slate-500 truncate">
+                  ${escapeHtml(item.statusNote || '')}
+                </p>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+                ${item.status === 'available' ? `
+                  <a
+                    href="${escapeHtml(item.nextUrl)}"
+                    target="_blank"
+                    rel="noopener"
+                    onclick="setTimeout(() => markAsReadAndAdvance('${item.id}'), 600)"
+                    class="flex-1 sm:flex-initial justify-center px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 transition"
+                  >
+                    <span>📖 อ่านตอนที่ ${escapeHtml(item.nextChapter)}</span>
+                  </a>
+                ` : `
+                  <a
+                    href="${escapeHtml(item.nextUrl)}"
+                    target="_blank"
+                    rel="noopener"
+                    class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1 transition"
+                    title="เปิดลิ้งค์ตอนถัดไปดูด้วยตัวเอง"
+                  >
+                    <span>เปิดลิ้งค์ตอน ${escapeHtml(item.nextChapter)} ↗</span>
+                  </a>
+                `}
+
+                <button
+                  onclick="markAsReadAndAdvance('${item.id}')"
+                  title="กดเมื่ออ่านตอนที่ ${escapeHtml(item.nextChapter)} จบแล้ว เพื่อขยับไปรอตอนถัดไป"
+                  class="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition whitespace-nowrap"
+                >
+                  ✓ อ่านตอน ${escapeHtml(item.nextChapter)} แล้ว (+1)
+                </button>
+
+                <button
+                  onclick="checkSingleManga('${item.id}')"
+                  title="เช็คตอนนี้ใหม่"
+                  class="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition"
+                >
+                  🔄
+                </button>
+
+                <button
+                  onclick="deleteManga('${item.id}')"
+                  title="ลบเรื่องนี้"
+                  class="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700/80 transition"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toastText').textContent = msg;
+      t.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.add('hidden'), 3500);
+    }
+
+    // ==========================================
+    // 7. INITIALIZATION
+    // ==========================================
+    window.addEventListener('DOMContentLoaded', async () => {
+      const titleInput = document.getElementById('mangaTitleInput');
+      titleInput.addEventListener('input', () => {
+        if (titleInput.value.trim()) {
+          titleInput.dataset.userTyped = '1';
+        } else {
+          delete titleInput.dataset.userTyped;
+        }
+      });
+
+      // Check if URL has ?sync=KEY for instant 1-click mobile pairing
+      const params = new URLSearchParams(window.location.search);
+      const urlSyncKey = params.get('sync');
+      if (urlSyncKey) {
+        syncKey = urlSyncKey.trim();
+        localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      loadMangas();
+      updateSyncStatusBadge();
+      renderMangaList();
+
+      if (syncKey) {
+        await pullFromCloud(false);
+      }
+
+      // Auto-check all mangas on startup if there are any
+      if (mangas.length > 0) {
+        checkAllMangas();
+      }
+    });
+  </script>
+</body>
+</html>
