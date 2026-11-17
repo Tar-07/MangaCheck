@@ -411,10 +411,15 @@
         const parts = u.pathname.split('/').filter(Boolean);
         if (parts.length === 0) return u.hostname;
 
+        // Special handling for Nekopost URLs: /manga/12345/10 or /novel/12345/10
+        if (u.hostname.includes('nekopost.net') && parts.length >= 2 && /^\d+$/.test(parts[1])) {
+          return `Nekopost #${parts[1]}`;
+        }
+
         // Pick the most descriptive slug segment
         let slug = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-        // If last segment is just "chapter-10", use parent segment
-        if (/^(?:chapter|chap|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+$/i.test(slug) && parts.length >= 2) {
+        // If last segment is just a number or "chapter-10", use parent segment
+        if (/^(?:(?:chapter|chap|ch|ep|episode|ตอนที่|ตอน)[-_]?)?\d+(?:\.\d+)?$/i.test(slug) && parts.length >= 2) {
           slug = parts[parts.length - 2];
         }
 
@@ -483,37 +488,76 @@
      */
     async function fetchViaCorsProxy(targetUrl) {
       const proxies = [
-        // 1. AllOrigins JSON wrapper (gives status + contents + final url)
+        // 1. Microlink API (Bypasses DDoS-Guard / Cloudflare on Nekopost & modern sites, returns clean title & description)
+        async (url) => {
+          const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`, {
+            signal: AbortSignal.timeout(10000)
+          });
+          if (!res.ok) throw new Error('Microlink failed');
+          const json = await res.json();
+          const d = json.data || {};
+          const title = d.title || '';
+          const desc = d.description || '';
+          const syntheticHtml = `<html><head><title>${title}</title><meta property="og:description" content="${desc}"></head><body><h1>${title}</h1><p>${desc}</p></body></html>`;
+          return {
+            html: syntheticHtml,
+            pageTitle: title,
+            pageDesc: desc,
+            httpCode: json.statusCode || 200,
+            finalUrl: d.url || url
+          };
+        },
+        // 2. Jina Reader API (r.jina.ai — Headless Chrome engine that renders JS & bypasses heavy Cloudflare / DDoS-Guard)
+        async (url) => {
+          const res = await fetch(`https://r.jina.ai/${url}`, {
+            headers: {
+              'Accept': 'application/json',
+              'X-Return-Format': 'markdown'
+            },
+            signal: AbortSignal.timeout(14000)
+          });
+          if (!res.ok) throw new Error('Jina Reader failed');
+          const json = await res.json();
+          const d = json.data || {};
+          const title = d.title || '';
+          const desc = d.description || '';
+          const content = d.content || '';
+          const cleanSnippet = content
+            .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+            .replace(/[#*_~`>-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 120);
+          const syntheticHtml = `<html><head><title>${title}</title><meta property="og:description" content="${desc}"></head><body><h1>${title}</h1><div>${content}</div></body></html>`;
+          return {
+            html: syntheticHtml,
+            pageTitle: title,
+            pageDesc: desc || cleanSnippet,
+            httpCode: d.httpStatus || json.code || 200,
+            finalUrl: d.finalUrl || d.url || url
+          };
+        },
+        // 3. AllOrigins JSON wrapper
         async (url) => {
           const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}&disableCache=true`, {
             signal: AbortSignal.timeout(10000)
           });
-          if (!res.ok) throw new Error('Proxy 1 failed');
+          if (!res.ok) throw new Error('Proxy 3 failed');
           const data = await res.json();
+          if (!data.contents) throw new Error('Empty contents');
           return {
             html: data.contents || '',
             httpCode: data.status?.http_code || 200,
             finalUrl: data.status?.url || url
           };
         },
-        // 2. CodeTabs Proxy fallback
+        // 4. CodeTabs Proxy fallback
         async (url) => {
           const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, {
             signal: AbortSignal.timeout(10000)
           });
-          if (!res.ok) throw new Error('Proxy 2 failed');
-          const text = await res.text();
-          return {
-            html: text,
-            httpCode: res.status,
-            finalUrl: url
-          };
-        },
-        // 3. Corsproxy.io fallback
-        async (url) => {
-          const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, {
-            signal: AbortSignal.timeout(10000)
-          });
+          if (!res.ok) throw new Error('Proxy 4 failed');
           const text = await res.text();
           return {
             html: text,
@@ -527,7 +571,7 @@
       for (const proxyFn of proxies) {
         try {
           const result = await proxyFn(targetUrl);
-          if (result && typeof result.html === 'string') {
+          if (result && typeof result.html === 'string' && result.html.length > 30) {
             return result;
           }
         } catch (err) {
@@ -537,103 +581,111 @@
       throw lastErr || new Error('ไม่สามารถเชื่อมต่อเว็บปลายทางได้');
     }
 
+    function isGenericTitle(title) {
+      if (!title) return true;
+      const t = title.trim();
+      return (
+        t.startsWith('Nekopost #') ||
+        /^\d+$/.test(t) ||
+        t === 'มังงะเรื่องใหม่' ||
+        /^(?:novel|manga|comic|project|chapter|chap|ep|ตอนที่)\s*#?\d*$/i.test(t)
+      );
+    }
+
+    function cleanSeriesTitleFromPageTitle(pageTitle) {
+      if (!pageTitle) return '';
+      const cleaned = pageTitle
+        .replace(/^\[[^\]]+\]\s*/, '') // remove leading [ล่าสุด]
+        .replace(/\s*[-|–—]\s*(?:Chapter|Chap|Ch|Episode|Ep|ตอนที่|ตอน)\s*\d*(?:\.\d+)?.*$/i, '')
+        .replace(/\s*(?:Chapter|Chap|Ch|Episode|Ep|ตอนที่|ตอน)\s*\d+(?:\.\d+)?.*$/i, '')
+        .replace(/\s*\|\s*Nekopost.*$/i, '')
+        .replace(/\s*[-|–—]\s*Nekopost.*$/i, '')
+        .trim();
+      if (/^(?:just a moment|attention required|404|error|nekopost|page not found)/i.test(cleaned)) {
+        return '';
+      }
+      return cleaned;
+    }
+
+    function extractTitleFromProbe(probe) {
+      if (!probe) return '';
+      if (probe.pageTitle) {
+        const t = cleanSeriesTitleFromPageTitle(probe.pageTitle);
+        if (t) return t;
+      }
+      if (probe.html) {
+        const m = probe.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        if (m && m[1]) {
+          const t = cleanSeriesTitleFromPageTitle(m[1].replace(/\s+/g, ' ').trim());
+          if (t) return t;
+        }
+      }
+      return '';
+    }
+
     function analyzeIfChapterExists(probeResult, item) {
       const { html, httpCode, finalUrl } = probeResult;
+      const detectedTitle = extractTitleFromProbe(probeResult);
+
       if (httpCode === 404 || httpCode >= 500) {
-        return { exists: false, reason: `HTTP ${httpCode} (ยังไม่มีหน้านี้)` };
+        return { exists: false, reason: `HTTP ${httpCode} (ยังไม่มีหน้านี้)`, detectedSeriesTitle: detectedTitle };
       }
 
-      if (!html || html.length < 200) {
-        return { exists: false, reason: 'หน้าเว็บว่างเปล่า' };
+      if (!html || html.length < 50) {
+        return { exists: false, reason: 'หน้าเว็บว่างเปล่า', detectedSeriesTitle: detectedTitle };
       }
 
       // Extract <title>
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-      const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+      const pageTitle = (probeResult.pageTitle || (titleMatch ? titleMatch[1] : '')).replace(/\s+/g, ' ').trim();
+      const pageDesc = (probeResult.pageDesc || '').replace(/\s+/g, ' ').trim();
 
       // 1. Check 404 / Not Found indicators in title or body
       const notFoundRegex = /(404\s*not\s*found|page\s*not\s*found|ไม่พบหน้า|ไม่พบเนื้อหา|ไม่พบตอนที่|ยังไม่มีตอน|error\s*404|nothing\s*found)/i;
       if (notFoundRegex.test(pageTitle)) {
-        return { exists: false, reason: 'หน้าเว็บแจ้งว่าไม่พบหน้า (404)' };
+        return { exists: false, reason: 'หน้าเว็บแจ้งว่าไม่พบหน้า (404)', detectedSeriesTitle: detectedTitle };
       }
 
-      // 2. Check if redirected back to main manga page or homepage (common in WordPress Madara / MangaThemesia)
-      // When a chapter doesn't exist, many manga sites redirect `/manga-name-chapter-11/` -> `/manga/manga-name/` or `/`
+      // Nekopost specific check: when chapter doesn't exist, title is "... - Chapter | Nekopost" or ends with "- Chapter"
+      if (/-\s*Chapter\s*(?:\|\s*Nekopost)?$/i.test(pageTitle)) {
+        return { exists: false, reason: `ตอนที่ ${item.nextChapter} ยังไม่มาบน Nekopost`, detectedSeriesTitle: detectedTitle };
+      }
+
+      // 2. Check if redirected back to main manga page or homepage
       const nextNumEscaped = String(item.nextChapter).replace('.', '\\.');
       const chapNumInFinalUrl = new RegExp(`(^|[^0-9])${nextNumEscaped}([^0-9]|$)`);
       if (finalUrl && !chapNumInFinalUrl.test(decodeURI(finalUrl))) {
-        return { exists: false, reason: 'ลิ้งค์ถูกดีดกลับหน้าหลัก (ตอนยังไม่มา)' };
+        return { exists: false, reason: 'ลิ้งค์ถูกดีดกลับหน้าหลัก (ตอนยังไม่มา)', detectedSeriesTitle: detectedTitle };
       }
 
-      // 3. Check if the <title> or canonical/heading actually mentions the next chapter number
-      // OR if the page has actual manga reader images / chapter navigation
+      // 3. Check if the <title> or description mentions the next chapter number
       const chapNumInTitle = new RegExp(`(^|[^0-9])${nextNumEscaped}([^0-9]|$)`);
       const hasReaderIndicators = /(wp-manga-chapter-img|reading-content|chapter-content|readerarea|ts-main-image|page-break|select-pagination)/i.test(html);
 
-      if (chapNumInTitle.test(pageTitle)) {
+      if (chapNumInTitle.test(pageTitle) || chapNumInTitle.test(pageDesc)) {
+        const reasonText = pageDesc
+          ? `มาแล้ว! "${pageDesc.slice(0, 70)}"`
+          : `ตรวจพบหน้า "${pageTitle.slice(0, 65)}"`;
         return {
           exists: true,
-          reason: `ตรวจพบหน้า "${pageTitle.slice(0, 60)}"`
+          reason: reasonText,
+          detectedSeriesTitle: detectedTitle
         };
       }
 
       if (hasReaderIndicators && !notFoundRegex.test(html.slice(0, 4000))) {
         return {
           exists: true,
-          reason: 'ตรวจพบหน้าอ่านมังงะของตอนถัดไป'
+          reason: 'ตรวจพบหน้าอ่านมังงะของตอนถัดไป',
+          detectedSeriesTitle: detectedTitle
         };
       }
 
       return {
         exists: false,
-        reason: 'ยังไม่พบเนื้อหาของตอนที่ ' + item.nextChapter
+        reason: 'ยังไม่พบเนื้อหาของตอนที่ ' + item.nextChapter,
+        detectedSeriesTitle: detectedTitle
       };
-    }
-
-    function extractCoverFromHtml(html, baseUrl) {
-      if (!html) return '';
-      const patterns = [
-        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
-        /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-        /<img[^>]+class=["'][^"']*wp-post-image[^"']*["'][^>]+src=["']([^"']+)["']/i,
-        /<div[^>]+class=["'][^"']*summary_image[^"']*["'][\s\S]*?<img[^>]+src=["']([^"']+)["']/i
-      ];
-      for (const reg of patterns) {
-        const m = html.match(reg);
-        if (m && m[1]) {
-          try {
-            return new URL(m[1].trim(), baseUrl).href;
-          } catch (e) {
-            return m[1].trim();
-          }
-        }
-      }
-      return '';
-    }
-
-    async function fetchCoverFromAnilist(title) {
-      if (!title) return '';
-      try {
-        const cleanTitle = title.replace(/ตอนที่.*$/i, '').trim();
-        const query = `
-          query ($search: String) {
-            Media (search: $search, type: MANGA) {
-              coverImage { large extraLarge }
-            }
-          }
-        `;
-        const res = await fetch('https://graphql.anilist.co', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ query, variables: { search: cleanTitle } })
-        });
-        if (!res.ok) return '';
-        const data = await res.json();
-        return data?.data?.Media?.coverImage?.large || data?.data?.Media?.coverImage?.extraLarge || '';
-      } catch (e) {
-        return '';
-      }
     }
 
     async function checkSingleManga(id, silent = false) {
@@ -649,16 +701,27 @@
         const probe = await fetchViaCorsProxy(item.nextUrl);
         let verdict = analyzeIfChapterExists(probe, item);
 
-        // Step 2: If Next URL didn't clearly verify, check Current URL page
-        if (!verdict.exists) {
+        // Auto-update generic/guessed title if real Thai/English title is detected from the page!
+        if (verdict.detectedSeriesTitle && isGenericTitle(mangas[idx].title)) {
+          mangas[idx].title = verdict.detectedSeriesTitle;
+        }
+
+        // Step 2: If Next URL didn't clearly verify OR title is still generic, check Current URL page
+        if (!verdict.exists || isGenericTitle(mangas[idx].title)) {
           try {
             const currentProbe = await fetchViaCorsProxy(item.currentUrl);
-            const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
-            if (nextPath.length > 4 && (currentProbe.html.includes(nextPath) || decodeURI(currentProbe.html).includes(decodeURI(nextPath)))) {
-              verdict = {
-                exists: true,
-                reason: 'พบปุ่ม/ลิ้งค์ตอนถัดไปปรากฏในหน้าตอนปัจจุบันแล้ว!'
-              };
+            const currentTitle = extractTitleFromProbe(currentProbe);
+            if (currentTitle && isGenericTitle(mangas[idx].title)) {
+              mangas[idx].title = currentTitle;
+            }
+            if (!verdict.exists) {
+              const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
+              if (nextPath.length > 4 && (currentProbe.html.includes(nextPath) || decodeURI(currentProbe.html).includes(decodeURI(nextPath)))) {
+                verdict = {
+                  exists: true,
+                  reason: 'พบปุ่ม/ลิ้งค์ตอนถัดไปปรากฏในหน้าตอนปัจจุบันแล้ว!'
+                };
+              }
             }
           } catch (e) {}
         }
