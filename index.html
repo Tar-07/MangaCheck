@@ -328,9 +328,11 @@
     // 1. STATE & STORAGE
     // ==========================================
     const STORAGE_KEY = 'mangacheck_items_v1';
+    const UPDATED_AT_KEY = 'mangacheck_updated_at_v1';
     const SYNC_KEY_STORAGE = 'mangacheck_sync_key_v1';
 
     let mangas = [];
+    let localUpdatedAt = Number(localStorage.getItem(UPDATED_AT_KEY) || 0);
     let currentFilter = 'all';
     let syncKey = localStorage.getItem(SYNC_KEY_STORAGE) || '';
 
@@ -488,33 +490,14 @@
      */
     async function fetchViaCorsProxy(targetUrl) {
       const proxies = [
-        // 1. Microlink API (Bypasses DDoS-Guard / Cloudflare on Nekopost & modern sites, returns clean title & description)
-        async (url) => {
-          const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`, {
-            signal: AbortSignal.timeout(10000)
-          });
-          if (!res.ok) throw new Error('Microlink failed');
-          const json = await res.json();
-          const d = json.data || {};
-          const title = d.title || '';
-          const desc = d.description || '';
-          const syntheticHtml = `<html><head><title>${title}</title><meta property="og:description" content="${desc}"></head><body><h1>${title}</h1><p>${desc}</p></body></html>`;
-          return {
-            html: syntheticHtml,
-            pageTitle: title,
-            pageDesc: desc,
-            httpCode: json.statusCode || 200,
-            finalUrl: d.url || url
-          };
-        },
-        // 2. Jina Reader API (r.jina.ai — Headless Chrome engine that renders JS & bypasses heavy Cloudflare / DDoS-Guard)
+        // 1. Jina Reader API (r.jina.ai — Fast Headless Chrome engine, no 429 rate-limit like Microlink)
         async (url) => {
           const res = await fetch(`https://r.jina.ai/${url}`, {
             headers: {
               'Accept': 'application/json',
               'X-Return-Format': 'markdown'
             },
-            signal: AbortSignal.timeout(14000)
+            signal: AbortSignal.timeout(12000)
           });
           if (!res.ok) throw new Error('Jina Reader failed');
           const json = await res.json();
@@ -536,6 +519,25 @@
             pageDesc: desc || cleanSnippet,
             httpCode: d.httpStatus || json.code || 200,
             finalUrl: d.finalUrl || d.url || url
+          };
+        },
+        // 2. Microlink API fallback
+        async (url) => {
+          const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`, {
+            signal: AbortSignal.timeout(8000)
+          });
+          if (!res.ok) throw new Error('Microlink failed');
+          const json = await res.json();
+          const d = json.data || {};
+          const title = d.title || '';
+          const desc = d.description || '';
+          const syntheticHtml = `<html><head><title>${title}</title><meta property="og:description" content="${desc}"></head><body><h1>${title}</h1><p>${desc}</p></body></html>`;
+          return {
+            html: syntheticHtml,
+            pageTitle: title,
+            pageDesc: desc,
+            httpCode: json.statusCode || 200,
+            finalUrl: d.url || url
           };
         },
         // 3. AllOrigins JSON wrapper
@@ -963,8 +965,12 @@
     // ==========================================
     // 5. CLOUD SYNC (CROSS-DEVICE PC & MOBILE)
     // ==========================================
-    // Instant client-side Sync Key generation + ntfy.sh JSON sync channel (zero CORS issues, 100% free & instant)
-    const NTFY_BASE = 'https://ntfy.sh';
+    // Multi-Server Redundant Ntfy Sync + Timestamp Guard (Prevents failed pushes from reverting to old 9-item cloud state on reload!)
+    const NTFY_SERVERS = [
+      'https://ntfy.envs.net',
+      'https://ntfy.adminforge.de',
+      'https://ntfy.sh'
+    ];
 
     function updateSyncStatusBadge() {
       const dot = document.getElementById('syncDot');
@@ -990,7 +996,9 @@
       const newKey = `mc_${randomPart}`;
 
       syncKey = newKey;
+      localUpdatedAt = Date.now();
       localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+      localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
       document.getElementById('syncKeyInput').value = syncKey;
       updateSyncStatusBadge();
 
@@ -1007,7 +1015,7 @@
     async function pushToCloud() {
       if (!syncKey) return false;
       const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
-      // Compact payload so 15+ mangas stay well under ntfy.sh 4096-byte message limit
+      // Compact payload so 15+ mangas stay well under ntfy 4096-byte message limit
       const compactMangas = mangas.map(m => ({
         i: m.id,
         t: m.title,
@@ -1018,15 +1026,18 @@
         s: m.status === 'checking' ? 'waiting' : (m.status || 'waiting'),
         ca: m.createdAt || Date.now()
       }));
-      try {
-        const res = await fetch(`${NTFY_BASE}/${topic}`, {
-          method: 'POST',
-          body: JSON.stringify({ updatedAt: Date.now(), mangas: compactMangas })
-        });
-        return res.ok;
-      } catch (e) {
-        return false;
-      }
+      const bodyStr = JSON.stringify({ updatedAt: localUpdatedAt || Date.now(), mangas: compactMangas });
+
+      const results = await Promise.allSettled(
+        NTFY_SERVERS.map(server =>
+          fetch(`${server}/${topic}`, {
+            method: 'POST',
+            body: bodyStr,
+            signal: AbortSignal.timeout(6000)
+          }).then(r => r.ok)
+        )
+      );
+      return results.some(r => r.status === 'fulfilled' && r.value === true);
     }
 
     function expandMangaItem(x) {
@@ -1039,7 +1050,6 @@
         currentChapter: x.c || '1',
         nextChapter: x.n || '2',
         nextUrl: x.nu || '',
-        coverUrl: x.cv || '',
         status: x.s || 'waiting',
         statusNote: '',
         lastChecked: Date.now(),
@@ -1047,45 +1057,70 @@
       };
     }
 
-    async function pullFromCloud(showFeedback = false) {
+    async function pullFromCloud(showFeedback = false, forceOverwriteLocal = false) {
       if (!syncKey) return;
       const msg = document.getElementById('syncModalMsg');
       const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
       try {
         if (showFeedback && msg) msg.textContent = 'กำลังดึงข้อมูลล่าสุดจาก Cloud...';
-        const res = await fetch(`${NTFY_BASE}/${topic}/json?poll=1&since=all`, {
-          cache: 'no-store'
-        });
-        if (!res.ok) throw new Error('เชื่อมต่อ Cloud ไม่สำเร็จ');
 
-        const text = await res.text();
-        const lines = text.trim().split('\n').filter(Boolean);
+        const responses = await Promise.allSettled(
+          NTFY_SERVERS.map(server =>
+            fetch(`${server}/${topic}/json?poll=1&since=all`, {
+              cache: 'no-store',
+              signal: AbortSignal.timeout(6000)
+            }).then(async r => (r.ok ? await r.text() : ''))
+          )
+        );
+
         let latestPayload = null;
+        let anyServerOk = false;
 
-        for (const line of lines) {
-          try {
-            const evt = JSON.parse(line);
-            if (evt.event === 'message' && evt.message && !evt.attachment) {
-              const parsedMsg = JSON.parse(evt.message);
-              if (parsedMsg && Array.isArray(parsedMsg.mangas)) {
-                if (!latestPayload || (parsedMsg.updatedAt || 0) >= (latestPayload.updatedAt || 0)) {
-                  latestPayload = parsedMsg;
+        for (const res of responses) {
+          if (res.status === 'fulfilled' && typeof res.value === 'string') {
+            anyServerOk = true;
+            const lines = res.value.trim().split('\n').filter(Boolean);
+            for (const line of lines) {
+              try {
+                const evt = JSON.parse(line);
+                if (evt.event === 'message' && evt.message && !evt.attachment) {
+                  const parsedMsg = JSON.parse(evt.message);
+                  if (parsedMsg && Array.isArray(parsedMsg.mangas)) {
+                    const msgTime = Number(parsedMsg.updatedAt || (evt.time ? evt.time * 1000 : 0));
+                    parsedMsg.updatedAt = msgTime;
+                    if (!latestPayload || msgTime >= (latestPayload.updatedAt || 0)) {
+                      latestPayload = parsedMsg;
+                    }
+                  }
                 }
-              }
+              } catch (err) {}
             }
-          } catch (err) {}
+          }
         }
 
+        if (!anyServerOk) throw new Error('เชื่อมต่อ Cloud ไม่สำเร็จ');
+
         if (latestPayload && Array.isArray(latestPayload.mangas)) {
-          mangas = latestPayload.mangas.map(expandMangaItem);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
-          renderMangaList();
+          const cloudTime = Number(latestPayload.updatedAt || 0);
+          // CRITICAL FIX: Only overwrite local mangas if Cloud is newer than local, OR user explicitly clicked "Pull from Cloud"
+          if (forceOverwriteLocal || mangas.length === 0 || cloudTime >= localUpdatedAt) {
+            mangas = latestPayload.mangas.map(expandMangaItem);
+            localUpdatedAt = cloudTime || Date.now();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
+            localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
+            renderMangaList();
+          } else {
+            // Local machine has newer changes (e.g. you just added/deleted items and refreshed before cloud updated) -> push local to cloud!
+            await pushToCloud();
+          }
           if (showFeedback && msg) {
             msg.innerHTML = `<span class="text-emerald-400">✅ ซิงค์ข้อมูลสำเร็จ! (พบมังงะ ${mangas.length} เรื่อง)</span>`;
           }
           if (showFeedback) showToast('☁️ ซิงค์ข้อมูลจาก Cloud เรียบร้อย');
         } else {
           // If no data on cloud yet, push current local data to initialize it
+          localUpdatedAt = Date.now();
+          localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
           await pushToCloud();
           if (showFeedback && msg) {
             msg.innerHTML = `<span class="text-emerald-400">✅ ผูกรหัสซิงค์ <b>${syncKey}</b> และอัปโหลดรายการปัจจุบัน (${mangas.length} เรื่อง) เรียบร้อย!</span>`;
@@ -1108,7 +1143,7 @@
       syncKey = inputVal;
       localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
       updateSyncStatusBadge();
-      await pullFromCloud(true);
+      await pullFromCloud(true, true);
     }
 
     async function forcePushNow() {
@@ -1124,6 +1159,8 @@
       }
       const msg = document.getElementById('syncModalMsg');
       if (msg) msg.textContent = 'กำลังส่งข้อมูลเครื่องนี้ขึ้น Cloud...';
+      localUpdatedAt = Date.now();
+      localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
       const ok = await pushToCloud();
       if (ok) {
         if (msg) msg.innerHTML = `<span class="text-emerald-400">✅ ส่งข้อมูลเครื่องนี้ (${mangas.length} เรื่อง) ขึ้น Cloud สำเร็จ!</span>`;
@@ -1194,6 +1231,8 @@
     function saveMangas(doPush = true) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
       if (doPush) {
+        localUpdatedAt = Date.now();
+        localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
         pushToCloud();
       }
     }
@@ -1421,6 +1460,7 @@
       // Check if URL has ?sync=KEY for instant 1-click mobile pairing
       const params = new URLSearchParams(window.location.search);
       const urlSyncKey = params.get('sync');
+      const isInitialPairing = Boolean(urlSyncKey);
       if (urlSyncKey) {
         syncKey = urlSyncKey.trim();
         localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
@@ -1432,7 +1472,7 @@
       renderMangaList();
 
       if (syncKey) {
-        await pullFromCloud(false);
+        await pullFromCloud(false, isInitialPairing);
       }
 
       // Auto-check all mangas on startup if there are any
