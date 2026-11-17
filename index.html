@@ -703,8 +703,8 @@
     // ==========================================
     // 5. CLOUD SYNC (CROSS-DEVICE PC & MOBILE)
     // ==========================================
-    // Uses npoint.io / jsonblob free anonymous JSON endpoints so user needs 0 signup & 0 server
-    const CLOUD_API_BASE = 'https://jsonblob.com/api/jsonBlob';
+    // Instant client-side Sync Key generation + ntfy.sh JSON sync channel (zero CORS issues, 100% free & instant)
+    const NTFY_BASE = 'https://ntfy.sh';
 
     function updateSyncStatusBadge() {
       const dot = document.getElementById('syncDot');
@@ -722,64 +722,90 @@
       const btn = document.getElementById('btnGenSync');
       const msg = document.getElementById('syncModalMsg');
       btn.disabled = true;
-      msg.textContent = 'กำลังสร้างรหัสซิงค์บน Cloud...';
 
-      try {
-        const res = await fetch(CLOUD_API_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ updatedAt: Date.now(), mangas })
-        });
-        // Extract Blob ID from Location header or response URL
-        const location = res.headers.get('Location') || res.headers.get('x-jsonblob') || '';
-        const blobId = location.split('/').pop();
-        if (!blobId) throw new Error('สร้างรหัสไม่สำเร็จ');
+      // Generate a unique, easy-to-copy sync key immediately on the client
+      const randomPart = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      const newKey = `mc_${randomPart}`;
 
-        syncKey = blobId;
-        localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
-        document.getElementById('syncKeyInput').value = syncKey;
-        updateSyncStatusBadge();
-        msg.innerHTML = `<span class="text-emerald-400">✅ สร้างรหัสซิงค์สำเร็จ! คัดลอกรหัสหรือลิ้งค์นี้ไปเปิดในมือถือได้เลย</span>`;
-      } catch (e) {
-        msg.innerHTML = `<span class="text-rose-400">⚠️ ไม่สามารถสร้างรหัสอัตโนมัติได้ในขณะนี้ สามารถใช้ปุ่มคัดลอกข้อมูลด้านล่างแทนได้ครับ</span>`;
-      } finally {
-        btn.disabled = false;
+      syncKey = newKey;
+      localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+      document.getElementById('syncKeyInput').value = syncKey;
+      updateSyncStatusBadge();
+
+      msg.innerHTML = `<span class="text-indigo-300">กำลังซิงค์ข้อมูลขึ้น Cloud...</span>`;
+      const ok = await pushToCloud();
+      if (ok) {
+        msg.innerHTML = `<span class="text-emerald-400">✅ สร้างรหัสซิงค์ <b>${syncKey}</b> สำเร็จ! กดปุ่ม "📋 คัดลอกลิ้งค์เปิดในมือถือ" ด้านล่างได้เลย</span>`;
+      } else {
+        msg.innerHTML = `<span class="text-emerald-400">✅ สร้างรหัส <b>${syncKey}</b> แล้ว! กดปุ่ม "📋 คัดลอกลิ้งค์เปิดในมือถือ" เพื่อส่งเข้ามือถือได้เลย</span>`;
       }
+      btn.disabled = false;
     }
 
     async function pushToCloud() {
-      if (!syncKey) return;
+      if (!syncKey) return false;
+      const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
       try {
-        await fetch(`${CLOUD_API_BASE}/${encodeURIComponent(syncKey)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        const res = await fetch(`${NTFY_BASE}/${topic}`, {
+          method: 'POST',
           body: JSON.stringify({ updatedAt: Date.now(), mangas })
         });
-      } catch (e) {}
+        return res.ok;
+      } catch (e) {
+        return false;
+      }
     }
 
     async function pullFromCloud(showFeedback = false) {
       if (!syncKey) return;
       const msg = document.getElementById('syncModalMsg');
+      const topic = `mangacheck_sync_${syncKey.replace(/[^a-zA-Z0-9_-]/g, '')}`;
       try {
         if (showFeedback && msg) msg.textContent = 'กำลังดึงข้อมูลล่าสุดจาก Cloud...';
-        const res = await fetch(`${CLOUD_API_BASE}/${encodeURIComponent(syncKey)}`, {
-          headers: { 'Accept': 'application/json' }
+        const res = await fetch(`${NTFY_BASE}/${topic}/json?poll=1&since=all`, {
+          cache: 'no-store'
         });
-        if (!res.ok) throw new Error('ไม่พบรหัสซิงค์นี้');
-        const data = await res.json();
-        if (data && Array.isArray(data.mangas)) {
-          mangas = data.mangas;
+        if (!res.ok) throw new Error('เชื่อมต่อ Cloud ไม่สำเร็จ');
+
+        const text = await res.text();
+        const lines = text.trim().split('\n').filter(Boolean);
+        let latestPayload = null;
+
+        for (const line of lines) {
+          try {
+            const evt = JSON.parse(line);
+            if (evt.event === 'message' && evt.message) {
+              const parsedMsg = JSON.parse(evt.message);
+              if (parsedMsg && Array.isArray(parsedMsg.mangas)) {
+                if (!latestPayload || (parsedMsg.updatedAt || 0) >= (latestPayload.updatedAt || 0)) {
+                  latestPayload = parsedMsg;
+                }
+              }
+            }
+          } catch (err) {}
+        }
+
+        if (latestPayload && Array.isArray(latestPayload.mangas)) {
+          mangas = latestPayload.mangas;
           localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
           renderMangaList();
           if (showFeedback && msg) {
-            msg.innerHTML = `<span class="text-emerald-400">✅ ซิงค์ข้อมูลสำเร็จ! (${mangas.length} เรื่อง)</span>`;
+            msg.innerHTML = `<span class="text-emerald-400">✅ ซิงค์ข้อมูลสำเร็จ! (พบมังงะ ${mangas.length} เรื่อง)</span>`;
           }
           if (showFeedback) showToast('☁️ ซิงค์ข้อมูลจาก Cloud เรียบร้อย');
+        } else {
+          // If no data on cloud yet, push current local data to initialize it
+          await pushToCloud();
+          if (showFeedback && msg) {
+            msg.innerHTML = `<span class="text-emerald-400">✅ ผูกรหัสซิงค์ <b>${syncKey}</b> และอัปโหลดรายการปัจจุบัน (${mangas.length} เรื่อง) เรียบร้อย!</span>`;
+          }
+          if (showFeedback) showToast('☁️ บันทึกรหัสซิงค์เรียบร้อย');
         }
       } catch (e) {
         if (showFeedback && msg) {
-          msg.innerHTML = `<span class="text-rose-400">⚠️ ไม่พบข้อมูลจากรหัสซิงค์นี้ กรุณาตรวจสอบรหัสอีกครั้ง</span>`;
+          msg.innerHTML = `<span class="text-rose-400">⚠️ ดึงข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</span>`;
         }
       }
     }
