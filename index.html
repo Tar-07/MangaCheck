@@ -97,7 +97,7 @@
 
       <form id="addMangaForm" onsubmit="handleAddManga(event)" class="space-y-3">
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
-          <div class="sm:col-span-6">
+          <div class="sm:col-span-8">
             <label class="block text-xs text-slate-400 mb-1">ลิ้งค์ตอนล่าสุดที่อ่าน (URL) <span class="text-rose-400">*</span></label>
             <input
               type="url"
@@ -108,21 +108,12 @@
               class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
             />
           </div>
-          <div class="sm:col-span-3">
+          <div class="sm:col-span-4">
             <label class="block text-xs text-slate-400 mb-1">ชื่อเรื่อง (เว้นว่างให้เดาได้)</label>
             <input
               type="text"
               id="mangaTitleInput"
               placeholder="เช่น One Piece"
-              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-            />
-          </div>
-          <div class="sm:col-span-3">
-            <label class="block text-xs text-slate-400 mb-1">ลิ้งค์รูปปก (ดึงให้อัตโนมัติถ้าเว้นว่าง)</label>
-            <input
-              type="url"
-              id="mangaCoverInput"
-              placeholder="https://.../cover.jpg"
               class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
             />
           </div>
@@ -271,7 +262,7 @@
     </div>
   </div>
 
-  <!-- Edit Manga Modal (Title, Cover, Chapter) -->
+  <!-- Edit Manga Modal (Title & Chapter) -->
   <div id="editModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/75 backdrop-blur-sm p-4">
     <div class="glass rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-700/80 space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -292,26 +283,6 @@
             required
             class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-indigo-500"
           />
-        </div>
-
-        <div>
-          <label class="block text-xs text-slate-400 mb-1">ลิ้งค์รูปปก (URL รูปภาพ)</label>
-          <div class="flex gap-2">
-            <input
-              type="url"
-              id="editCoverInput"
-              placeholder="https://.../cover.jpg (เว้นว่างเพื่อดึงอัตโนมัติ)"
-              oninput="previewEditCover(this.value)"
-              class="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
-            />
-            <button type="button" onclick="autoFetchCoverForEdit()" id="btnAutoCover" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-indigo-300 border border-slate-700 whitespace-nowrap">
-              🔍 ดึงปกอัตโนมัติ
-            </button>
-          </div>
-          <div id="editCoverPreviewWrap" class="mt-2 hidden items-center gap-3 bg-slate-900/70 p-2 rounded-xl border border-slate-800">
-            <img id="editCoverPreviewImg" src="" alt="Preview" class="w-12 h-16 object-cover rounded-lg bg-slate-800 border border-slate-700" onerror="this.src='https://placehold.co/120x160/1e293b/94a3b8?text=No+Cover'" />
-            <span class="text-[11px] text-slate-400">ตัวอย่างรูปปกที่จะแสดง</span>
-          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -344,17 +315,6 @@
           </button>
         </div>
       </form>
-    </div>
-  </div>
-
-  <!-- Cover Lightbox Modal (ดูรูปปกขนาดใหญ่) -->
-  <div id="coverLightbox" onclick="closeCoverLightbox()" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-md p-4 cursor-zoom-out">
-    <div class="relative max-w-sm w-full flex flex-col items-center gap-3" onclick="event.stopPropagation()">
-      <img id="lightboxImg" src="" alt="Manga Cover" class="max-h-[78vh] w-auto rounded-2xl shadow-2xl border border-slate-700 object-contain bg-slate-900" />
-      <div class="flex items-center justify-between w-full px-2">
-        <span id="lightboxTitle" class="text-sm font-semibold text-white truncate"></span>
-        <button onclick="closeCoverLightbox()" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">ปิด ✕</button>
-      </div>
     </div>
   </div>
 
@@ -689,46 +649,24 @@
         const probe = await fetchViaCorsProxy(item.nextUrl);
         let verdict = analyzeIfChapterExists(probe, item);
 
-        // Try extracting cover if missing
-        if (!mangas[idx].coverUrl && probe.html) {
-          const ogCover = extractCoverFromHtml(probe.html, item.nextUrl);
-          if (ogCover) mangas[idx].coverUrl = ogCover;
-        }
-
-        // Step 2: If Next URL didn't clearly verify OR cover is still missing, check Current URL page
-        if (!verdict.exists || !mangas[idx].coverUrl) {
+        // Step 2: If Next URL didn't clearly verify, check Current URL page
+        if (!verdict.exists) {
           try {
             const currentProbe = await fetchViaCorsProxy(item.currentUrl);
-            if (!mangas[idx].coverUrl && currentProbe.html) {
-              const ogCover2 = extractCoverFromHtml(currentProbe.html, item.currentUrl);
-              if (ogCover2) mangas[idx].coverUrl = ogCover2;
-            }
-            if (!verdict.exists) {
-              const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
-              if (nextPath.length > 4 && (currentProbe.html.includes(nextPath) || decodeURI(currentProbe.html).includes(decodeURI(nextPath)))) {
-                verdict = {
-                  exists: true,
-                  reason: 'พบปุ่ม/ลิ้งค์ตอนถัดไปปรากฏในหน้าตอนปัจจุบันแล้ว!'
-                };
-              }
+            const nextPath = new URL(item.nextUrl).pathname.replace(/\/$/, '');
+            if (nextPath.length > 4 && (currentProbe.html.includes(nextPath) || decodeURI(currentProbe.html).includes(decodeURI(nextPath)))) {
+              verdict = {
+                exists: true,
+                reason: 'พบปุ่ม/ลิ้งค์ตอนถัดไปปรากฏในหน้าตอนปัจจุบันแล้ว!'
+              };
             }
           } catch (e) {}
-        }
-
-        // Step 3: If cover is still empty, try Anilist cover search by title
-        if (!mangas[idx].coverUrl) {
-          const aniCover = await fetchCoverFromAnilist(mangas[idx].title);
-          if (aniCover) mangas[idx].coverUrl = aniCover;
         }
 
         mangas[idx].status = verdict.exists ? 'available' : 'waiting';
         mangas[idx].statusNote = verdict.reason;
         mangas[idx].lastChecked = Date.now();
       } catch (err) {
-        if (!mangas[idx].coverUrl) {
-          const aniCover = await fetchCoverFromAnilist(mangas[idx].title);
-          if (aniCover) mangas[idx].coverUrl = aniCover;
-        }
         mangas[idx].status = 'error';
         mangas[idx].statusNote = 'เว็บปลายทางบล็อกการเช็คอัตโนมัติ (กดปุ่ม "เปิดลองเช็คเอง" ได้เลย)';
         mangas[idx].lastChecked = Date.now();
@@ -853,11 +791,8 @@
 
       document.getElementById('editMangaId').value = item.id;
       document.getElementById('editTitleInput').value = item.title || '';
-      document.getElementById('editCoverInput').value = item.coverUrl || '';
       document.getElementById('editCurrentChapInput').value = `ตอนที่ ${item.currentChapter}`;
       document.getElementById('editNextChapInput').value = item.nextChapter || '';
-
-      previewEditCover(item.coverUrl || '');
 
       const modal = document.getElementById('editModal');
       modal.classList.remove('hidden');
@@ -870,50 +805,6 @@
       modal.classList.remove('flex');
     }
 
-    function previewEditCover(url) {
-      const wrap = document.getElementById('editCoverPreviewWrap');
-      const img = document.getElementById('editCoverPreviewImg');
-      if (url && url.trim()) {
-        img.src = url.trim();
-        wrap.classList.remove('hidden');
-        wrap.classList.add('flex');
-      } else {
-        wrap.classList.add('hidden');
-        wrap.classList.remove('flex');
-      }
-    }
-
-    async function autoFetchCoverForEdit() {
-      const id = document.getElementById('editMangaId').value;
-      const title = document.getElementById('editTitleInput').value.trim();
-      const item = mangas.find(m => m.id === id);
-      const btn = document.getElementById('btnAutoCover');
-      btn.disabled = true;
-      btn.textContent = 'กำลังดึงปก...';
-
-      let foundCover = '';
-      if (item) {
-        try {
-          const probe = await fetchViaCorsProxy(item.currentUrl);
-          foundCover = extractCoverFromHtml(probe.html, item.currentUrl);
-        } catch (e) {}
-      }
-      if (!foundCover && title) {
-        foundCover = await fetchCoverFromAnilist(title);
-      }
-
-      btn.disabled = false;
-      btn.textContent = '🔍 ดึงปกอัตโนมัติ';
-
-      if (foundCover) {
-        document.getElementById('editCoverInput').value = foundCover;
-        previewEditCover(foundCover);
-        showToast('✨ ดึงรูปปกอัตโนมัติสำเร็จ!');
-      } else {
-        showToast('⚠️ ไม่พบรูปปกอัตโนมัติ คุณสามารถก๊อปปี้ลิ้งค์รูปมาวางได้เลย');
-      }
-    }
-
     async function saveEditManga(e) {
       e.preventDefault();
       const id = document.getElementById('editMangaId').value;
@@ -921,12 +812,10 @@
       if (idx === -1) return;
 
       const newTitle = document.getElementById('editTitleInput').value.trim();
-      const newCover = document.getElementById('editCoverInput').value.trim();
       const newNextChap = document.getElementById('editNextChapInput').value.trim();
 
       const oldNextChap = mangas[idx].nextChapter;
       if (newTitle) mangas[idx].title = newTitle;
-      mangas[idx].coverUrl = newCover;
 
       if (newNextChap && newNextChap !== oldNextChap) {
         const reparsed = parseMangaUrl(mangas[idx].currentUrl, newNextChap);
@@ -944,21 +833,6 @@
       if (newNextChap && newNextChap !== oldNextChap) {
         await checkSingleManga(id);
       }
-    }
-
-    function openCoverLightbox(url, title) {
-      if (!url) return;
-      document.getElementById('lightboxImg').src = url;
-      document.getElementById('lightboxTitle').textContent = title || '';
-      const lb = document.getElementById('coverLightbox');
-      lb.classList.remove('hidden');
-      lb.classList.add('flex');
-    }
-
-    function closeCoverLightbox() {
-      const lb = document.getElementById('coverLightbox');
-      lb.classList.add('hidden');
-      lb.classList.remove('flex');
     }
 
     function deleteManga(id) {
@@ -1026,7 +900,6 @@
         c: m.currentChapter,
         n: m.nextChapter,
         nu: m.nextUrl,
-        cv: m.coverUrl || '',
         s: m.status === 'checking' ? 'waiting' : (m.status || 'waiting'),
         ca: m.createdAt || Date.now()
       }));
@@ -1304,79 +1177,45 @@
           catch (e) { return 'เว็บมังงะ'; }
         })();
 
-        const hasCover = Boolean(item.coverUrl && item.coverUrl.trim());
-        const coverHtml = hasCover
-          ? `
-            <div
-              onclick="openCoverLightbox('${escapeHtml(item.coverUrl)}', '${escapeHtml(item.title)}')"
-              class="w-16 h-24 sm:w-20 sm:h-28 rounded-xl overflow-hidden bg-slate-800 border border-slate-700/80 flex-shrink-0 cursor-zoom-in group relative shadow-md"
-              title="คลิกเพื่อดูรูปปกขนาดใหญ่"
-            >
-              <img
-                src="${escapeHtml(item.coverUrl)}"
-                alt="${escapeHtml(item.title)}"
-                class="w-full h-full object-cover group-hover:scale-105 transition duration-200"
-                onerror="this.onerror=null; this.src='https://placehold.co/160x224/1e293b/64748b?text=No+Cover';"
-              />
-              <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition flex items-center justify-center">
-                <span class="opacity-0 group-hover:opacity-100 text-[10px] bg-black/70 text-white px-1.5 py-0.5 rounded">🔍 ดูปก</span>
-              </div>
-            </div>
-          `
-          : `
-            <div
-              onclick="openEditModal('${item.id}')"
-              class="w-16 h-24 sm:w-20 sm:h-28 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-dashed border-slate-700 flex flex-col items-center justify-center flex-shrink-0 cursor-pointer text-slate-500 hover:text-indigo-400 transition p-1 text-center"
-              title="คลิกเพื่อเพิ่มหรือดึงรูปปก"
-            >
-              <span class="text-lg">🖼️</span>
-              <span class="text-[10px] leading-tight mt-1">เพิ่มปก</span>
-            </div>
-          `;
-
         return `
           <div class="glass rounded-2xl p-4 sm:p-5 transition hover:border-slate-700 border ${cardBorder}">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div class="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
-                ${coverHtml}
-
-                <div class="space-y-1.5 min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 font-mono">${escapeHtml(hostname)}</span>
-                    ${statusBadge}
-                  </div>
-
-                  <div class="flex items-center gap-1.5">
-                    <h3
-                      onclick="openEditModal('${item.id}')"
-                      class="text-base font-bold text-white truncate cursor-pointer hover:text-indigo-300 transition"
-                      title="คลิกเพื่อแก้ไขชื่อเรื่อง / รูปปก"
-                    >
-                      ${escapeHtml(item.title)}
-                    </h3>
-                    <button
-                      onclick="openEditModal('${item.id}')"
-                      title="แก้ไขชื่อเรื่อง / รูปปก / เลขตอน"
-                      class="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 transition flex-shrink-0"
-                    >
-                      ✏️ แก้ไข
-                    </button>
-                  </div>
-
-                  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                    <div>
-                      อ่านล่าสุด: <a href="${escapeHtml(item.currentUrl)}" target="_blank" rel="noopener" class="text-indigo-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.currentChapter)} ↗</a>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      ลิ้งค์ตอนถัดไป:
-                      <a href="${escapeHtml(item.nextUrl)}" target="_blank" rel="noopener" class="text-emerald-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.nextChapter)} ↗</a>
-                    </div>
-                  </div>
-
-                  <p class="text-[11px] text-slate-500 truncate">
-                    ${escapeHtml(item.statusNote || '')}
-                  </p>
+              <div class="space-y-1.5 min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 font-mono">${escapeHtml(hostname)}</span>
+                  ${statusBadge}
                 </div>
+
+                <div class="flex items-center gap-1.5">
+                  <h3
+                    onclick="openEditModal('${item.id}')"
+                    class="text-base font-bold text-white truncate cursor-pointer hover:text-indigo-300 transition"
+                    title="คลิกเพื่อแก้ไขชื่อเรื่อง / เลขตอน"
+                  >
+                    ${escapeHtml(item.title)}
+                  </h3>
+                  <button
+                    onclick="openEditModal('${item.id}')"
+                    title="แก้ไขชื่อเรื่อง / เลขตอน"
+                    class="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 transition flex-shrink-0"
+                  >
+                    ✏️ แก้ไข
+                  </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                  <div>
+                    อ่านล่าสุด: <a href="${escapeHtml(item.currentUrl)}" target="_blank" rel="noopener" class="text-indigo-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.currentChapter)} ↗</a>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    ลิ้งค์ตอนถัดไป:
+                    <a href="${escapeHtml(item.nextUrl)}" target="_blank" rel="noopener" class="text-emerald-400 hover:underline font-medium">ตอนที่ ${escapeHtml(item.nextChapter)} ↗</a>
+                  </div>
+                </div>
+
+                <p class="text-[11px] text-slate-500 truncate">
+                  ${escapeHtml(item.statusNote || '')}
+                </p>
               </div>
 
               <!-- Action Buttons -->
