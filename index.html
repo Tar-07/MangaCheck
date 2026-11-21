@@ -276,13 +276,13 @@
         <input type="hidden" id="editMangaId" />
 
         <div>
-          <label class="block text-xs text-slate-400 mb-1">ชื่อเรื่อง</label>
-          <input
-            type="text"
+          <label class="block text-xs text-slate-400 mb-1">ชื่อเรื่องเต็ม (สามารถดูหรือแก้ไขได้)</label>
+          <textarea
             id="editTitleInput"
+            rows="3"
             required
-            class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-indigo-500"
-          />
+            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white leading-relaxed focus:outline-none focus:border-indigo-500 resize-y"
+          ></textarea>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -1511,18 +1511,18 @@
                   ${statusBadge}
                 </div>
 
-                <div class="flex items-center gap-1.5">
+                <div class="flex items-start gap-1.5">
                   <h3
-                    onclick="openEditModal('${item.id}')"
-                    class="text-base font-bold text-white truncate cursor-pointer hover:text-indigo-300 transition"
-                    title="คลิกเพื่อแก้ไขชื่อเรื่อง / เลขตอน"
+                    onclick="this.classList.toggle('truncate'); this.classList.toggle('whitespace-normal'); this.classList.toggle('break-words');"
+                    class="text-base font-bold text-white truncate cursor-pointer hover:text-indigo-300 transition select-none"
+                    title="คลิกที่ชื่อเพื่อกางดูชื่อเรื่องเต็มๆ"
                   >
                     ${escapeHtml(item.title)}
                   </h3>
                   <button
                     onclick="openEditModal('${item.id}')"
                     title="แก้ไขชื่อเรื่อง / เลขตอน"
-                    class="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 transition flex-shrink-0"
+                    class="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 transition flex-shrink-0 mt-0.5"
                   >
                     ✏️ แก้ไข
                   </button>
