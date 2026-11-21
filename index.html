@@ -891,8 +891,12 @@
         createdAt: Date.now()
       };
 
+      // If re-adding a previously deleted series, remove it from deletedMangaIds
+      deletedMangaIds = deletedMangaIds.filter(k => k !== newBaseKey);
+      localStorage.setItem('mangacheck_deleted_ids_v1', JSON.stringify(deletedMangaIds));
+
       mangas.unshift(newItem);
-      saveMangas();
+      saveMangas(false);
       renderMangaList();
 
       // Reset form
@@ -925,7 +929,7 @@
       mangas[idx].status = 'checking';
       mangas[idx].statusNote = 'กำลังเช็คตอนถัดไป...';
 
-      saveMangas();
+      saveMangas(false);
       renderMangaList();
       showToast(`เลื่อน "${item.title}" เป็นอ่านถึงตอนที่ ${mangas[idx].currentChapter} แล้ว`);
       await checkSingleManga(id);
@@ -993,6 +997,11 @@
       const item = mangas.find(m => m.id === id);
       if (!item) return;
       if (!confirm(`ลบเรื่อง "${item.title}" ออกจากรายการติดตามใช่ไหม?`)) return;
+      const bKey = getSeriesBaseKey(item.currentUrl, item.currentChapter);
+      if (!deletedMangaIds.includes(item.id)) deletedMangaIds.push(item.id);
+      if (bKey && !deletedMangaIds.includes(bKey)) deletedMangaIds.push(bKey);
+      localStorage.setItem('mangacheck_deleted_ids_v1', JSON.stringify(deletedMangaIds));
+
       mangas = mangas.filter(m => m.id !== id);
       saveMangas();
       renderMangaList();
@@ -1049,6 +1058,47 @@
       btn.disabled = false;
     }
 
+    let deletedMangaIds = JSON.parse(localStorage.getItem('mangacheck_deleted_ids_v1') || '[]');
+    let pushDebounceTimer = null;
+
+    function mergeLocalAndCloudMangas(localList, cloudList, delIds = []) {
+      const delSet = new Set(delIds || []);
+      const map = new Map();
+
+      const addOrUpdate = (item, isCloud) => {
+        if (!item || !item.currentUrl) return;
+        if (delSet.has(item.id)) return;
+        const baseKey = getSeriesBaseKey(item.currentUrl, item.currentChapter);
+        if (delSet.has(baseKey)) return;
+
+        const existing = map.get(baseKey);
+        if (!existing) {
+          map.set(baseKey, { ...item });
+          return;
+        }
+
+        const chapExist = parseFloat(existing.currentChapter) || 0;
+        const chapNew = parseFloat(item.currentChapter) || 0;
+
+        let winner = existing;
+        let loser = item;
+        if (chapNew > chapExist || (chapNew === chapExist && isCloud)) {
+          winner = { ...item };
+          loser = existing;
+        }
+
+        if (isGenericTitle(winner.title) && !isGenericTitle(loser.title)) {
+          winner.title = loser.title;
+        }
+        map.set(baseKey, winner);
+      };
+
+      (localList || []).forEach(m => addOrUpdate(m, false));
+      (cloudList || []).forEach(m => addOrUpdate(m, true));
+
+      return Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    }
+
     function utf8ByteLength(str) {
       return new TextEncoder().encode(str).length;
     }
@@ -1078,7 +1128,7 @@
 
       for (const item of compactMangas) {
         const testChunk = [...currentChunk, item];
-        const testStr = JSON.stringify({ updatedAt: batchId, part: 0, totalParts: 99, mangas: testChunk });
+        const testStr = JSON.stringify({ updatedAt: batchId, part: 0, totalParts: 99, del: deletedMangaIds.slice(-30), mangas: testChunk });
         if (currentChunk.length > 0 && utf8ByteLength(testStr) > MAX_CHUNK_BYTES) {
           chunks.push(currentChunk);
           currentChunk = [item];
@@ -1094,10 +1144,16 @@
       let allPartsSucceeded = true;
 
       for (let partIdx = 0; partIdx < totalParts; partIdx++) {
+        // Slight delay between chunks so ntfy never drops or rate-limits multi-part uploads
+        if (partIdx > 0) {
+          await new Promise(r => setTimeout(r, 350));
+        }
+
         const bodyStr = JSON.stringify({
           updatedAt: batchId,
           part: partIdx,
           totalParts,
+          del: partIdx === 0 ? deletedMangaIds.slice(-30) : undefined,
           mangas: chunks[partIdx]
         });
 
@@ -1177,9 +1233,13 @@
                     const totalParts = Number(parsedMsg.totalParts || 1);
 
                     if (!batches.has(batchId)) {
-                      batches.set(batchId, { updatedAt: batchId, totalParts, parts: new Map() });
+                      batches.set(batchId, { updatedAt: batchId, totalParts, del: [], parts: new Map() });
                     }
-                    batches.get(batchId).parts.set(part, parsedMsg.mangas);
+                    const bObj = batches.get(batchId);
+                    if (Array.isArray(parsedMsg.del)) {
+                      bObj.del.push(...parsedMsg.del);
+                    }
+                    bObj.parts.set(part, parsedMsg.mangas);
                   }
                 }
               } catch (err) {}
@@ -1201,16 +1261,27 @@
             }
           }
 
+          if (Array.isArray(latestComplete.del) && latestComplete.del.length > 0) {
+            deletedMangaIds = Array.from(new Set([...deletedMangaIds, ...latestComplete.del]));
+            localStorage.setItem('mangacheck_deleted_ids_v1', JSON.stringify(deletedMangaIds));
+          }
+
+          const cloudMangas = combinedRaw.map(expandMangaItem);
           const cloudTime = Number(latestComplete.updatedAt || 0);
-          if (forceOverwriteLocal || mangas.length === 0 || cloudTime >= localUpdatedAt) {
-            mangas = combinedRaw.map(expandMangaItem);
-            localUpdatedAt = cloudTime || Date.now();
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
-            localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
-            renderMangaList();
-          } else {
+          const prevCount = mangas.length;
+
+          // CRITICAL FIX: Always MERGE local mangas with Cloud mangas (instead of blindly overwriting local with an older 11-item cloud snapshot!)
+          mangas = mergeLocalAndCloudMangas(mangas, cloudMangas, deletedMangaIds);
+          localUpdatedAt = Math.max(localUpdatedAt, cloudTime || Date.now());
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
+          localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
+          renderMangaList();
+
+          // If local had more items (e.g. 19 items locally vs 11 on cloud), push the merged 19 items to cloud!
+          if (mangas.length > cloudMangas.length || mangas.length !== prevCount) {
             await pushToCloud();
           }
+
           if (showFeedback && msg) {
             msg.innerHTML = `<span class="text-emerald-400">✅ ซิงค์ข้อมูลสำเร็จ! (พบมังงะ ${mangas.length} เรื่อง)</span>`;
           }
@@ -1327,10 +1398,13 @@
     // ==========================================
     function saveMangas(doPush = true) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mangas));
-      if (doPush) {
-        localUpdatedAt = Date.now();
-        localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
-        pushToCloud();
+      localUpdatedAt = Date.now();
+      localStorage.setItem(UPDATED_AT_KEY, String(localUpdatedAt));
+      if (doPush && syncKey) {
+        clearTimeout(pushDebounceTimer);
+        pushDebounceTimer = setTimeout(() => {
+          pushToCloud();
+        }, 1200);
       }
     }
 
